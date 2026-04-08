@@ -1,18 +1,19 @@
 # 02501 Final Project
 
+## UV 
+navigate to ./project
+uv sync
 
-**Data**
-There are 10 classes of actions:
- 0. BodyWeightSquats
- 1. HandstandPushups
- 2. HandstandWalking
- 3. JumpingJack
- 4. JumpRope
- 5. Lunges
- 6. PullUps
- 7. PushUps
- 8. TrampolineJumping
- 9. WallPushups
+## DVC 
+
+uv run dvc pull 
+
+When you run dvc pull, your terminal will give you a long link. Click it (or copy/paste it into your browser).
+
+Log in specifically with registered email (If you use any other email, Google will block you).
+
+data/coco will appear
+
 
 **Running batch job**
 
@@ -20,19 +21,7 @@ There are 10 classes of actions:
 bsub < jobscript.sh
 ```
 
-## 4.1 Explore models
-- Aggregate single frames
-- Early fusion
-- Late fusion
-- 3D CNN
-
-## 4.2 Leakage between train/test/validation
-
-
-## 4.3 Dual-stream networks
 
 
 
-# Misc
-- Taking inspiration from structure: https://www.geeksforgeeks.org/deep-learning/how-to-structure-a-pytorch-project/
-- Rich logging (handler): https://github.com/Textualize/rich/discussions/1173
+
