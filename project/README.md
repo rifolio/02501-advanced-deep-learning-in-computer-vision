@@ -1,7 +1,5 @@
-# Project 2 - Video classification
+# 02501 Final Project
 
-**Requirements**
-    - Add the data and extract it `unzip ucf101.zip`. It will be saved in the directory ufc10 which is gitignored. DO NOT PUSH THE DATA!
 
 **Data**
 There are 10 classes of actions:
