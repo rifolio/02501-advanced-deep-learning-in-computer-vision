@@ -3,53 +3,65 @@ import wandb
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
 
+from config import settings
+
+
 class Experiment:
     def __init__(self, project_name: str, config: dict):
         self.project_name = project_name
         self.config = config
-        self.dataloader = config['test_loader']
-        self.model = config['model']
-        self.dataset_name = config['dataset']
-        
+        self.dataloader = config["test_loader"]
+        self.model = config["model"]
+        self.dataset_name = config["dataset"]
+
+        wandb_cfg = {
+            "model": self.model.model_name,
+            "dataset": self.dataset_name,
+        }
+        ds = self.dataloader.dataset
+        man = getattr(ds, "manifest", None)
+        if man is not None:
+            wandb_cfg["eval_split_n_images"] = len(man.image_ids)
+            wandb_cfg["eval_split_seed"] = man.seed
+            wandb_cfg["eval_cat_ids"] = (
+                man.eval_cat_ids if man.eval_cat_ids is not None else "all_80"
+            )
+            if settings.eval_split_path:
+                wandb_cfg["eval_split_path"] = settings.eval_split_path
+
         wandb.init(
             project=self.project_name,
             name=f"{self.model.model_name}_ZeroShot",
-            config={
-                "model": self.model.model_name,
-                "dataset": self.dataset_name
-            }
+            config=wandb_cfg,
         )
 
     def run_evaluation(self):
         results = []
-        
+
         for batch in tqdm(self.dataloader, desc=f"Evaluating {self.model.model_name}"):
             for item in batch:
-                image_id = item['image_id']
-                image = item['image']
-                img_w, img_h = item['width'], item['height']
+                if not item["targets"]:
+                    continue
+                image_id = item["image_id"]
+                image = item["image"]
+                img_w, img_h = item["width"], item["height"]
 
-                # FIX: Extract unique classes to avoid redundant model calls
-                unique_classes = {target['category_id']: target['class_name'] for target in item['targets']}
-                
+                unique_classes = {
+                    target["category_id"]: target["class_name"]
+                    for target in item["targets"]
+                }
+
                 for cat_id, class_name in unique_classes.items():
-                    # Call the plug-and-play model ONLY ONCE per unique class
                     boxes = self.model.predict(image, class_name, img_w, img_h)
-                
-                # for target in item['targets']:
-                #     cat_id = target['category_id']
-                #     class_name = target['class_name']
-                    
-                #     # Call the plug-and-play model
-                #     boxes = self.model.predict(image, class_name, img_w, img_h)
-                    
                     for box in boxes:
-                        results.append({
-                            "image_id": image_id,
-                            "category_id": cat_id,
-                            "bbox": box,
-                            "score": 1.0
-                        })
+                        results.append(
+                            {
+                                "image_id": image_id,
+                                "category_id": cat_id,
+                                "bbox": box,
+                                "score": 1.0,
+                            }
+                        )
 
         # Save and Evaluate
         result_file = f"{self.model.model_name}_results.json"
@@ -62,8 +74,14 @@ class Experiment:
     def _calculate_and_log_metrics(self, result_file: str):
         cocoGt = self.dataloader.dataset.coco
         cocoDt = cocoGt.loadRes(result_file)
-        
-        cocoEval = COCOeval(cocoGt, cocoDt, 'bbox')
+
+        cocoEval = COCOeval(cocoGt, cocoDt, "bbox")
+        man = getattr(self.dataloader.dataset, "manifest", None)
+        if man is not None:
+            cocoEval.params.imgIds = sorted(man.image_ids)
+            if man.eval_cat_ids is not None:
+                cocoEval.params.catIds = sorted(man.eval_cat_ids)
+
         cocoEval.evaluate()
         cocoEval.accumulate()
         cocoEval.summarize()

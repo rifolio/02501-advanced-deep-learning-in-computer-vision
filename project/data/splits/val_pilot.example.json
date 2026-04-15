@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "ann_file": "data/coco/annotations/instances_val2017.json",
+  "image_ids": [139, 285, 632],
+  "eval_cat_ids": [1, 2, 3],
+  "seed": 42,
+  "description": "Example only — replace with output from scripts/build_eval_split.py"
+}
