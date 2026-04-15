@@ -28,13 +28,20 @@ class Experiment:
                 image_id = item['image_id']
                 image = item['image']
                 img_w, img_h = item['width'], item['height']
+
+                # FIX: Extract unique classes to avoid redundant model calls
+                unique_classes = {target['category_id']: target['class_name'] for target in item['targets']}
                 
-                for target in item['targets']:
-                    cat_id = target['category_id']
-                    class_name = target['class_name']
-                    
-                    # Call the plug-and-play model
+                for cat_id, class_name in unique_classes.items():
+                    # Call the plug-and-play model ONLY ONCE per unique class
                     boxes = self.model.predict(image, class_name, img_w, img_h)
+                
+                # for target in item['targets']:
+                #     cat_id = target['category_id']
+                #     class_name = target['class_name']
+                    
+                #     # Call the plug-and-play model
+                #     boxes = self.model.predict(image, class_name, img_w, img_h)
                     
                     for box in boxes:
                         results.append({

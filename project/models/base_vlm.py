@@ -4,6 +4,7 @@ class BaseVLM(ABC):
     def __init__(self, device: str):
         self.device = device
         self.model_name = "BaseVLM"
+        print(self.device)
 
     @abstractmethod
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
