@@ -1,0 +1,13 @@
+# Markdown: version README + ROADMAP only; ignore drafts and notes elsewhere
+**/*.md
+!**/README.md
+!**/ROADMAP.md
+
+# Python / tooling caches
+**/__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
