@@ -19,18 +19,30 @@ class Qwen2_5_VL(BaseVLM):
 
     def _parse_boxes(self, text: str, img_width: int, img_height: int) -> list:
         boxes = []
-        pattern = r"<\|box_start\|>\((\d+),(\d+),(\d+),(\d+)\)<\|box_end\|>"
+        # changed matches to the following way for QWEN2.5: absolute coordinates in (xmin, ymin), (xmax, ymax) format
+        # Matches <|box_start|>(x1, y1), (x2, y2)<|box_end|> with optional spaces
+        pattern = r"<\|box_start\|>\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*,\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)<\|box_end\|>"
         matches = re.findall(pattern, text)
+
+        #Calculate the dimensions the processor resized the image to
+        resized_width = round(img_width / 28.0) * 28
+        resized_height = round(img_height / 28.0) * 28
         
+        #Calculate the ratio to scale back to the original
+        width_ratio = img_width / resized_width if resized_width > 0 else 1
+        height_ratio = img_height / resized_height if resized_height > 0 else 1
+
         for match in matches:
-            ymin, xmin, ymax, xmax = map(int, match)
-            abs_xmin = (xmin / 1000.0) * img_width
-            abs_ymin = (ymin / 1000.0) * img_height
-            abs_xmax = (xmax / 1000.0) * img_width
-            abs_ymax = (ymax / 1000.0) * img_height
+        #changed this as QWEN2.5 outputs absolute scales! there's no need to 
+        #worry about normalized or scaled coordinates AFAIK
+
+            xmin, ymin, xmax, ymax = map(int, match)
             
-            width = abs_xmax - abs_xmin
-            height = abs_ymax - abs_ymin
+            # Calculate width and height directly using absolute coordinates
+            width = xmax - xmin
+            height = ymax - ymin
+
+            # Append in COCO format: [x, y, width, height]
             boxes.append([abs_xmin, abs_ymin, width, height])
         return boxes
 
