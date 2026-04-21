@@ -14,3 +14,17 @@ class BaseVLM(ABC):
         [[x, y, width, height], [x, y, width, height], ...]
         """
         pass
+
+    def predict_few_shot(
+        self,
+        query_image,
+        support_images: list,
+        prompt_text: str,
+        img_width: int,
+        img_height: int,
+    ) -> list:
+        """
+        Few-shot detection entrypoint.
+        Models that do not support multi-image few-shot should override this.
+        """
+        raise NotImplementedError(f"{self.model_name} does not implement predict_few_shot")

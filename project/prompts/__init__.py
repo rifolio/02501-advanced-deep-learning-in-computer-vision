@@ -1,0 +1,18 @@
+from .base_strategy import PromptStrategy
+from .cropped_exemplars import CroppedExemplarsStrategy
+from .set_of_mark import SetOfMarkStrategy
+from .side_by_side import SideBySideStrategy
+from .text_from_vision import TextFromVisionStrategy
+
+
+def get_prompt_strategy(name: str) -> PromptStrategy:
+    strategy_map = {
+        "side_by_side": SideBySideStrategy,
+        "cropped_exemplars": CroppedExemplarsStrategy,
+        "text_from_vision": TextFromVisionStrategy,
+        "set_of_mark": SetOfMarkStrategy,
+    }
+    if name not in strategy_map:
+        valid = ", ".join(sorted(strategy_map))
+        raise ValueError(f"Unknown prompt strategy '{name}'. Valid values: {valid}")
+    return strategy_map[name]()

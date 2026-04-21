@@ -1,4 +1,3 @@
-from os import device_encoding
 import re
 import torch
 import torchvision.transforms as T
@@ -70,8 +69,9 @@ def dynamic_preprocess(image, min_num=1, max_num=6, image_size=448, use_thumbnai
 class InternVL2_5_8B(BaseVLM):
     def __init__(self, device: str):
         super().__init__(device)
-        # self.model_name = "InternVL2.5-8B"
-        # self.model_id = "OpenGVLab/InternVL2_5-8B"
+        self.model_name = "InternVL2.5-8B"
+        self.model_id = "OpenGVLab/InternVL2_5-8B"
+        self.icl_strategy = None
 
         # Flash Attention is generally unsupported on MPS or CPU backends.
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -115,84 +115,84 @@ class InternVL2_5_8B(BaseVLM):
             
         return boxes
 
-    # def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
-    #     # Using InternVL's standard <image> token phrasing for grounding tasks
-    #     question = f"<image>\nPlease provide the bounding box coordinates of the region this sentence describes: Detect all {target_class}."
-        
-    #     if isinstance(image, str):
-    #         image = Image.open(image).convert('RGB')
-    #     elif getattr(image, 'mode', None) != 'RGB':
-    #         image = image.convert('RGB')
-        
-    #     transform = build_transform(input_size=448)
-    #     images = dynamic_preprocess(image, image_size=448, use_thumbnail=True, max_num=6)
-    #     pixel_values = [transform(img) for img in images]
-        
-    #     # InternVL expects the pixel tensor to match the model's dtype
-    #     pixel_values = torch.stack(pixel_values).to(torch.bfloat16).to(self.device)
-
-    #     generation_config = dict(max_new_tokens=256, do_sample=False)
-        
-    #     with torch.no_grad():
-    #         output_text = self.model.chat(
-    #             self.tokenizer, 
-    #             pixel_values, 
-    #             question, 
-    #             generation_config,
-    #             return_history=False
-    #         )
-            
-    #     return self._parse_boxes(output_text, img_width, img_height)
-
     def predict(self, image, target_class: str, img_width: int, img_height: int, support_examples: list = None) -> list:
+        if isinstance(image, str):
+            image = Image.open(image).convert('RGB')
+        elif getattr(image, 'mode', None) != 'RGB':
+            image = image.convert('RGB')
+
+        if self.icl_strategy and support_examples:
+            structured_inputs = self.icl_strategy.apply(image, target_class, support_examples)
+        else:
+            structured_inputs = [{
+                "image": image,
+                "text": f"Please provide the bounding box coordinates of the region this sentence describes: Detect all {target_class}.",
+            }]
+
+        return self._run_structured_inputs(structured_inputs, img_width, img_height)
+
+    def _prepare_multi_image_pixels(
+        self,
+        images: list[Image.Image],
+        max_num: int = 6,
+    ) -> tuple[torch.Tensor, list[int]]:
+        transform = build_transform(input_size=448)
+        all_tiles = []
+        num_patches_list = []
+
+        for image in images:
             if isinstance(image, str):
-                image = Image.open(image).convert('RGB')
-            elif getattr(image, 'mode', None) != 'RGB':
-                image = image.convert('RGB')
+                image = Image.open(image).convert("RGB")
+            elif getattr(image, "mode", None) != "RGB":
+                image = image.convert("RGB")
 
-            # 1. Get structured inputs from the Strategy
-            if self.icl_strategy and support_examples:
-                structured_inputs = self.icl_strategy.apply(image, target_class, support_examples)
-            else:
-                structured_inputs = [{
-                    "image": image, 
-                    "text": f"Please provide the bounding box coordinates of the region this sentence describes: Detect all {target_class}."
-                }]
+            processed = dynamic_preprocess(image, image_size=448, use_thumbnail=True, max_num=max_num)
+            num_patches_list.append(len(processed))
+            all_tiles.extend(processed)
 
-            prompt_text = ""
-            pixel_values_list = []
-            num_patches_list = []
-            transform = build_transform(input_size=448)
-            
-            # 2. Process each image separately and track patch counts
-            for i, item in enumerate(structured_inputs):
-                # Preprocess the individual image
-                # Note: lower max_num to 6 or 4 if you hit VRAM limits on the HPC cluster with multiple support images
-                processed_crops = dynamic_preprocess(item["image"], image_size=448, use_thumbnail=True, max_num=6)
-                crops_tensor = torch.stack([transform(crop) for crop in processed_crops])
-                
-                pixel_values_list.append(crops_tensor)
-                
-                # Track how many crops/patches this specific image generated
-                num_patches_list.append(crops_tensor.size(0))
-                
-                # Format the text with the explicit, interleaved image tag
-                # e.g., "Image-1: <image>\nExample 1: This image contains..."
-                prompt_text += f"Image-{i+1}: <image>\n{item['text']}\n"
+        pixel_values = [transform(img) for img in all_tiles]
+        pixel_values = torch.stack(pixel_values).to(torch.bfloat16).to(self.device)
+        return pixel_values, num_patches_list
 
-            # 3. Concatenate all patches into a single tensor for the forward pass
-            pixel_values = torch.cat(pixel_values_list, dim=0).to(torch.bfloat16).to(self.device)
+    def _run_with_images(self, images: list[Image.Image], question: str, img_width: int, img_height: int) -> list:
+        pixel_values, num_patches_list = self._prepare_multi_image_pixels(images)
 
-            generation_config = dict(max_new_tokens=256, do_sample=False)
-            
-            with torch.no_grad():
-                output_text = self.model.chat(
-                    self.tokenizer, 
-                    pixel_values, 
-                    prompt_text.strip(), # Clean up the trailing newline
-                    generation_config,
-                    num_patches_list=num_patches_list, # <--- Crucial for interleaved routing
-                    return_history=False
-                )
-                
-            return self._parse_boxes(output_text, img_width, img_height)
+        generation_config = dict(max_new_tokens=256, do_sample=False)
+
+        with torch.no_grad():
+            output_text = self.model.chat(
+                self.tokenizer,
+                pixel_values,
+                question,
+                generation_config,
+                num_patches_list=num_patches_list,
+                return_history=False,
+            )
+
+        return self._parse_boxes(output_text, img_width, img_height)
+
+    def _run_structured_inputs(
+        self,
+        structured_inputs: list[dict],
+        img_width: int,
+        img_height: int,
+    ) -> list:
+        images = [item["image"] for item in structured_inputs]
+        prompt_parts = []
+        for i, item in enumerate(structured_inputs, start=1):
+            prompt_parts.append(f"Image-{i}: <image>\n{item['text']}")
+        question = "\n".join(prompt_parts)
+        return self._run_with_images(images, question, img_width, img_height)
+
+    def predict_few_shot(
+        self,
+        query_image,
+        support_images: list,
+        prompt_text: str,
+        img_width: int,
+        img_height: int,
+    ) -> list:
+        images = list(support_images) + [query_image]
+        image_tokens = "".join("<image>\n" for _ in images)
+        question = f"{image_tokens}{prompt_text}"
+        return self._run_with_images(images, question, img_width, img_height)

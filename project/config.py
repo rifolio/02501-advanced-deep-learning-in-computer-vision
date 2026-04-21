@@ -19,6 +19,11 @@ class Settings(BaseSettings):
     api_key: str = ""
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log_level: int = logging.INFO
+    experiment_mode: str = "zero_shot"
+    model_name: str = "qwen"
+    k_shot: int = 1
+    few_shot_seed: int = 42
+    prompt_strategy: str = "side_by_side"
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
