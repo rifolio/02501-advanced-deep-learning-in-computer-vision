@@ -82,6 +82,14 @@ EXPERIMENT_MODE=zero_shot     # zero_shot | few_shot
 K_SHOT=3
 FEW_SHOT_SEED=42
 PROMPT_STRATEGY=side_by_side  # side_by_side | cropped_exemplars | text_from_vision | set_of_mark
+
+# Side-by-side GT vs prediction visualizations are enabled by default
+# (set to false to disable)
+LOG_VIZ_ARTIFACT=true
+VIZ_MAX_IMAGES=50
+VIZ_PREVIEW_COUNT=12
+VIZ_TARGET_CATEGORY=car       # optional; leave unset to include all classes
+VIZ_OUTPUT_DIR=viz
 ```
 
 Run:
@@ -89,6 +97,11 @@ Run:
 ```bash
 uv run python main.py
 ```
+
+By default (`LOG_VIZ_ARTIFACT=true`), the pipeline generates side-by-side JPEGs
+(`Ground Truth` on the left in green, `Prediction` on the right in red),
+for the evaluated images from the chosen eval split/dataset, logs a preview panel
+to the run, and uploads the full folder as a W&B artifact.
 
 ## Visual few-shot preview images
 
