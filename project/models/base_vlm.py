@@ -4,7 +4,7 @@ class BaseVLM(ABC):
     def __init__(self, device: str):
         self.device = device
         self.model_name = "BaseVLM"
-        print(self.device)
+        self._runtime_stats: dict[str, int] = {}
 
     @abstractmethod
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
@@ -28,3 +28,11 @@ class BaseVLM(ABC):
         Models that do not support multi-image few-shot should override this.
         """
         raise NotImplementedError(f"{self.model_name} does not implement predict_few_shot")
+
+    def _bump_runtime_stat(self, key: str, value: int = 1) -> None:
+        self._runtime_stats[key] = self._runtime_stats.get(key, 0) + value
+
+    def pop_runtime_stats(self) -> dict[str, int]:
+        stats = dict(self._runtime_stats)
+        self._runtime_stats.clear()
+        return stats

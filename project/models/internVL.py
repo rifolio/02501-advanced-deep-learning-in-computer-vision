@@ -1,4 +1,6 @@
 import re
+import logging
+import hashlib
 import torch
 import torchvision.transforms as T
 from PIL import Image
@@ -6,6 +8,8 @@ from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoTokenizer, AutoModel
 
 from .base_vlm import BaseVLM
+
+logger = logging.getLogger(__name__)
 
 IMAGENET_MEAN = (0.485, 0.456, 0.406)
 IMAGENET_STD = (0.229, 0.224, 0.225)
@@ -90,16 +94,23 @@ class InternVL2_5_8B(BaseVLM):
         ).eval().to(self.device)
         # REMOVED: .to(self.device) because device_map="auto" and load_in_8bit handle it; otherwise we delete them and add it
 
-    def _parse_boxes(self, text: str, img_width: int, img_height: int) -> list:
+    def _parse_boxes(self, text: str, img_width: int, img_height: int) -> tuple[list, bool]:
         boxes = []
         
         # InternVL outputs grounding coordinates in a [0, 1000] normalized range
         # formatted similarly to: <ref>class</ref><box>[[x1, y1, x2, y2]]</box>
         pattern = r"\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]"
         matches = re.findall(pattern, text)
+        parser_fallback_used = False
+
+        if not matches:
+            # Fallback for decimal coordinates and nested brackets.
+            fallback_pattern = r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
+            matches = re.findall(fallback_pattern, text)
+            parser_fallback_used = bool(matches)
         
         for match in matches:
-            xmin, ymin, xmax, ymax = map(int, match)
+            xmin, ymin, xmax, ymax = map(float, match)
             
             # Map the normalized [0, 1000] space back to absolute pixel dimensions
             abs_xmin = (xmin / 1000.0) * img_width
@@ -112,7 +123,34 @@ class InternVL2_5_8B(BaseVLM):
             
             boxes.append([abs_xmin, abs_ymin, width, height])
             
-        return boxes
+        return boxes, parser_fallback_used
+
+    def _log_inference_debug(
+        self,
+        question: str,
+        output_text: str,
+        parsed_box_count: int,
+        parser_fallback_used: bool,
+        image_count: int,
+    ) -> None:
+        prompt_hash = hashlib.sha1(question.encode("utf-8")).hexdigest()[:12]
+        prompt_snippet = question.strip().replace("\n", " ")[:120]
+        output_snippet = output_text.strip().replace("\n", " ")[:180]
+        level = logging.INFO if parsed_box_count == 0 else logging.DEBUG
+        logger.log(
+            level,
+            (
+                "[inference_debug] model=%s image_count=%s prompt_hash=%s prompt_snippet=%r "
+                "parsed_boxes=%s parser_fallback_used=%s output_snippet=%r"
+            ),
+            self.model_name,
+            image_count,
+            prompt_hash,
+            prompt_snippet,
+            parsed_box_count,
+            parser_fallback_used,
+            output_snippet,
+        )
 
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
         structured_inputs = [
@@ -164,7 +202,19 @@ class InternVL2_5_8B(BaseVLM):
                 return_history=False,
             )
 
-        return self._parse_boxes(output_text, img_width, img_height)
+        parsed_boxes, parser_fallback_used = self._parse_boxes(output_text, img_width, img_height)
+        if parser_fallback_used:
+            self._bump_runtime_stat("parser_fallback_used")
+        if not parsed_boxes:
+            self._bump_runtime_stat("queries_with_zero_boxes")
+        self._log_inference_debug(
+            question=question,
+            output_text=output_text,
+            parsed_box_count=len(parsed_boxes),
+            parser_fallback_used=parser_fallback_used,
+            image_count=len(images),
+        )
+        return parsed_boxes
 
     def _run_structured_inputs(
         self,
