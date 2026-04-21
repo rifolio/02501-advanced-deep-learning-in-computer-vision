@@ -93,6 +93,12 @@ class InternVL2_5_8B(BaseVLM):
             trust_remote_code=True
         ).eval().to(self.device)
         # REMOVED: .to(self.device) because device_map="auto" and load_in_8bit handle it; otherwise we delete them and add it
+        logger.info(
+            "Initialized model=%s model_id=%s device=%s",
+            self.model_name,
+            self.model_id,
+            self.device,
+        )
 
     def _parse_boxes(self, text: str, img_width: int, img_height: int) -> tuple[list, bool]:
         boxes = []
@@ -237,9 +243,18 @@ class InternVL2_5_8B(BaseVLM):
         img_width: int,
         img_height: int,
     ) -> list:
+        strict_output_tail = (
+            "\nOutput requirements:\n"
+            "Return ONLY a Python-style list in this exact format: [[x1, y1, x2, y2], ...]\n"
+            "Coordinates must be integers in [0, 1000].\n"
+            "Use [x1, y1, x2, y2] with x1 < x2 and y1 < y2.\n"
+            "Do not return words, labels, markdown, or explanations.\n"
+            "If no instance is present, return [] exactly."
+        )
+        strict_prompt_text = f"{prompt_text.rstrip()}{strict_output_tail}"
         structured_inputs = [
             {"image": support_image, "text": "Reference support example."}
             for support_image in support_images
         ]
-        structured_inputs.append({"image": query_image, "text": prompt_text})
+        structured_inputs.append({"image": query_image, "text": strict_prompt_text})
         return self._run_structured_inputs(structured_inputs, img_width, img_height)
