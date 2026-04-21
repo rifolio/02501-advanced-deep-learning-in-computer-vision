@@ -45,6 +45,26 @@ class Settings(BaseSettings):
         default="side_by_side",
         validation_alias=AliasChoices("PROMPT_STRATEGY", "prompt_strategy"),
     )
+    log_viz_artifact: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("LOG_VIZ_ARTIFACT", "log_viz_artifact"),
+    )
+    viz_max_images: int = Field(
+        default=50,
+        validation_alias=AliasChoices("VIZ_MAX_IMAGES", "viz_max_images"),
+    )
+    viz_preview_count: int = Field(
+        default=12,
+        validation_alias=AliasChoices("VIZ_PREVIEW_COUNT", "viz_preview_count"),
+    )
+    viz_target_category: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("VIZ_TARGET_CATEGORY", "viz_target_category"),
+    )
+    viz_output_dir: str = Field(
+        default="viz",
+        validation_alias=AliasChoices("VIZ_OUTPUT_DIR", "viz_output_dir"),
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
@@ -69,11 +89,17 @@ logging.basicConfig(level=settings.log_level)
 logger.info(f'Using device: {settings.device}')
 logger.info(f"Using dataset: {settings.data_dir}")
 logger.info(
-    "Runtime selection: model_name=%s experiment_mode=%s k_shot=%s prompt_strategy=%s",
+    (
+        "Runtime selection: model_name=%s experiment_mode=%s k_shot=%s prompt_strategy=%s "
+        "log_viz_artifact=%s viz_max_images=%s viz_target_category=%s"
+    ),
     settings.model_name,
     settings.experiment_mode,
     settings.k_shot,
     settings.prompt_strategy,
+    settings.log_viz_artifact,
+    settings.viz_max_images,
+    settings.viz_target_category,
 )
 if settings.eval_split_path:
     logger.info("Runtime selection: eval_split_path=%s", settings.eval_split_path)

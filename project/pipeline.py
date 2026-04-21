@@ -1,9 +1,12 @@
 import json
 import logging
 from pathlib import Path
+from collections import defaultdict
+
 import wandb
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
+from PIL import Image, ImageDraw
 
 from config import settings
 from prompts import get_prompt_strategy
@@ -43,6 +46,7 @@ class Experiment:
 
     def run_evaluation(self):
         results = []
+        evaluated_image_ids: list[int] = []
         counters = {
             "num_items_total": 0,
             "num_items_skipped_no_targets": 0,
@@ -59,6 +63,7 @@ class Experiment:
                     counters["num_items_skipped_no_targets"] += 1
                     continue
                 image_id = item["image_id"]
+                evaluated_image_ids.append(int(image_id))
                 image = item["image"]
                 img_w, img_h = item["width"], item["height"]
 
@@ -101,6 +106,7 @@ class Experiment:
         self._log_run_diagnostics(result_file, counters)
             
         self._calculate_and_log_metrics(result_file)
+        self._maybe_log_viz_artifact(result_file, evaluated_image_ids)
         wandb.finish()
 
     def _consume_runtime_stat(self, key: str) -> int:
@@ -179,6 +185,138 @@ class Experiment:
         }
         wandb.log(metrics)
 
+    def _maybe_log_viz_artifact(self, result_file: str, evaluated_image_ids: list[int]) -> None:
+        if not settings.log_viz_artifact:
+            return
+        run = wandb.run
+        if run is None:
+            logger.warning("Skipping viz artifact logging because wandb.run is None.")
+            return
+
+        with open(result_file, encoding="utf-8") as f:
+            preds = json.load(f)
+        if not preds:
+            logger.info("Skipping viz artifact logging because %s has no predictions.", result_file)
+            return
+
+        dataset = self.dataloader.dataset
+        coco = getattr(dataset, "coco", None)
+        img_dir = getattr(dataset, "img_dir", None)
+        if coco is None or img_dir is None:
+            logger.warning("Skipping viz artifact logging because dataset is missing coco/img_dir.")
+            return
+
+        target_cat_id = None
+        if settings.viz_target_category:
+            cat_ids = coco.getCatIds(catNms=[settings.viz_target_category])
+            if not cat_ids:
+                logger.warning(
+                    "viz_target_category=%r not found in COCO categories; using all predictions.",
+                    settings.viz_target_category,
+                )
+            else:
+                target_cat_id = cat_ids[0]
+
+        preds_by_img: dict[int, list[dict]] = defaultdict(list)
+        for pred in preds:
+            if target_cat_id is not None and pred["category_id"] != target_cat_id:
+                continue
+            preds_by_img[int(pred["image_id"])].append(pred)
+
+        stem = Path(result_file).stem
+        out_dir = Path(settings.viz_output_dir) / f"{stem}_side_by_side"
+        out_dir.mkdir(parents=True, exist_ok=True)
+
+        cat_id_to_name = {
+            cat["id"]: cat["name"]
+            for cat in coco.loadCats(coco.getCatIds())
+        }
+
+        unique_eval_ids = list(dict.fromkeys(int(x) for x in evaluated_image_ids))
+        if not unique_eval_ids:
+            logger.info("No evaluated image IDs captured for visualization; skipping viz artifact.")
+            return
+
+        rendered_paths: list[Path] = []
+        for idx, image_id in enumerate(unique_eval_ids):
+            if idx >= settings.viz_max_images:
+                break
+            image_preds = preds_by_img.get(image_id, [])
+
+            img_info = coco.loadImgs(image_id)[0]
+            img_path = Path(img_dir) / img_info["file_name"]
+            if not img_path.exists():
+                logger.warning("Image not found for visualization: %s", img_path)
+                continue
+
+            base_img = Image.open(img_path).convert("RGB")
+            gt_panel = base_img.copy()
+            pred_panel = base_img.copy()
+            draw_gt = ImageDraw.Draw(gt_panel)
+            draw_pred = ImageDraw.Draw(pred_panel)
+
+            # Draw GT boxes for target category (if set) or all categories in the image.
+            if target_cat_id is not None:
+                gt_cat_ids = [target_cat_id]
+            else:
+                gt_cat_ids = None
+            ann_ids = coco.getAnnIds(imgIds=[image_id], catIds=gt_cat_ids, iscrowd=None)
+            anns = coco.loadAnns(ann_ids)
+            for ann in anns:
+                x, y, w, h = ann["bbox"]
+                cat_name = cat_id_to_name.get(int(ann["category_id"]), str(ann["category_id"]))
+                draw_gt.rectangle([x, y, x + w, y + h], outline="lime", width=3)
+                draw_gt.text((x, max(0, y - 14)), f"GT:{cat_name}", fill="lime")
+
+            for pred_item in image_preds:
+                x, y, w, h = pred_item["bbox"]
+                cat_name = cat_id_to_name.get(int(pred_item["category_id"]), str(pred_item["category_id"]))
+                draw_pred.rectangle([x, y, x + w, y + h], outline="red", width=3)
+                draw_pred.text((x, max(0, y - 14)), f"P:{cat_name}", fill="red")
+
+            w, h = base_img.size
+            header_h = 30
+            canvas = Image.new("RGB", (w * 2, h + header_h), color="white")
+            canvas.paste(gt_panel, (0, header_h))
+            canvas.paste(pred_panel, (w, header_h))
+            draw_canvas = ImageDraw.Draw(canvas)
+            draw_canvas.text((10, 8), "Ground Truth (green)", fill="black")
+            draw_canvas.text((w + 10, 8), "Prediction (red)", fill="black")
+
+            out_path = out_dir / f"{idx + 1:03d}_{image_id}.jpg"
+            canvas.save(out_path, quality=90)
+            rendered_paths.append(out_path)
+
+        if not rendered_paths:
+            logger.info("No visualization files were rendered; skipping artifact upload.")
+            return
+
+        preview_count = max(0, settings.viz_preview_count)
+        if preview_count:
+            preview_images = [wandb.Image(str(p)) for p in rendered_paths[:preview_count]]
+            wandb.log({"viz_side_by_side_preview": preview_images})
+
+        artifact = wandb.Artifact(
+            name=f"{run.id}-side-by-side-viz",
+            type="evaluation-viz",
+            description=f"GT vs prediction overlays for {stem}",
+            metadata={
+                "model": self.model.model_name,
+                "dataset": self.dataset_name,
+                "result_file": result_file,
+                "num_rendered_images": len(rendered_paths),
+                "viz_max_images": settings.viz_max_images,
+                "viz_target_category": settings.viz_target_category or "all",
+            },
+        )
+        artifact.add_dir(str(out_dir))
+        run.log_artifact(artifact)
+        logger.info(
+            "Logged side-by-side visualization artifact from %s with %s images.",
+            out_dir,
+            len(rendered_paths),
+        )
+
 
 class FewShotExperiment(Experiment):
     def __init__(self, project_name: str, config: dict):
@@ -199,6 +337,7 @@ class FewShotExperiment(Experiment):
 
     def run_evaluation(self):
         results = []
+        evaluated_image_ids: list[int] = []
         fallback_to_zero_shot_count = 0
         fallback_reasons: set[str] = set()
         counters = {
@@ -218,6 +357,7 @@ class FewShotExperiment(Experiment):
                     continue
 
                 image_id = item["image_id"]
+                evaluated_image_ids.append(int(image_id))
                 query_image = item["image"]
                 img_w, img_h = item["width"], item["height"]
                 support_by_cat = item.get("support_by_cat", {})
@@ -310,4 +450,5 @@ class FewShotExperiment(Experiment):
             wandb.log({"few_shot_fallback_to_zero_shot_count": 0, "few_shot_fallback_used": 0})
 
         self._calculate_and_log_metrics(result_file)
+        self._maybe_log_viz_artifact(result_file, evaluated_image_ids)
         wandb.finish()
