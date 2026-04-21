@@ -19,55 +19,29 @@ class BaseICLStrategy(ABC):
         pass
 
 class SideBySideStrategy(BaseICLStrategy):
-    """
-    (a) Side-by-side layout: Spatially concatenates support images and the query image 
-    into a single canvas horizontally.
-    """
-    def apply(self, query_image: Image.Image, target_class: str, support_examples: List[Dict[str, Any]]) -> Tuple[List[Image.Image], str]:
-        # Resize support images to match the query image height for uniform concatenation
-        target_h = query_image.height
-        images_to_stitch = [ex["image"] for ex in support_examples] + [query_image]
+    def apply(self, query_image: Image.Image, target_class: str, support_examples: list[dict]) -> list[dict]:
+        structured_inputs = []
         
-        resized_images = []
-        for img in images_to_stitch:
-            if img.height != target_h:
-                aspect_ratio = img.width / img.height
-                new_w = int(target_h * aspect_ratio)
-                resized_images.append(img.resize((new_w, target_h)))
-            else:
-                resized_images.append(img)
-        
-        total_w = sum(img.width for img in resized_images)
-        stitched_image = Image.new('RGB', (total_w, target_h))
-        
-        prompt = f"Detect all instances of {target_class}. Here are support examples alongside the query image.\n"
-        x_offset = 0
-        
-        for i, img in enumerate(resized_images):
-            stitched_image.paste(img, (x_offset, 0))
+        # 1. Format the Support Examples
+        for i, example in enumerate(support_examples):
+            # Pass the bounding boxes in the format your specific VLM expects. 
+            # Note: You may need to normalize these to [0, 1000] for InternVL 
+            # or keep them absolute depending on how you fine-tune/prompt.
+            box_text = f"Example {i+1}: This image contains {target_class} at bounding boxes: {example['boxes']}."
             
-            # If it is a support example, map its ground truth boxes to the new stitched coordinate space
-            if i < len(support_examples):
-                orig_w, orig_h = support_examples[i]["image"].width, support_examples[i]["image"].height
-                scale_x = img.width / orig_w
-                scale_y = img.height / orig_h
-                
-                adjusted_boxes = []
-                for box in support_examples[i]["boxes"]:
-                    x, y, w, h = box
-                    new_x = (x * scale_x) + x_offset
-                    new_y = (y * scale_y)
-                    new_w = w * scale_x
-                    new_h = h * scale_y
-                    adjusted_boxes.append([round(new_x, 1), round(new_y, 1), round(new_w, 1), round(new_h, 1)])
-                
-                prompt += f"Image section {i+1} boxes: {adjusted_boxes}\n"
+            structured_inputs.append({
+                "image": example["image"],
+                "text": box_text
+            })
             
-            x_offset += img.width
-            
-        prompt += f"\n<image>\nProvide the bounding box coordinates [x, y, w, h] for {target_class} in the final (rightmost) section of this composite image."
+        # 2. Format the Query Image
+        query_text = f"Now, look at this final image. Please provide the bounding box coordinates of the region this sentence describes: Detect all {target_class}."
+        structured_inputs.append({
+            "image": query_image,
+            "text": query_text
+        })
         
-        return [stitched_image], prompt
+        return structured_inputs
 
 class TextFromVisionStrategy(BaseICLStrategy):
     """
