@@ -68,6 +68,17 @@ flowchart LR
 
 ## Next steps (small chunks)
 
+### Progress checklist (implementation status)
+
+- [x] **A. Support pool and sampling** — `SupportExample` + `SupportSetSampler` with disjoint support pools and deterministic sampling.
+- [x] **B. Bounding boxes on images** — `render_bboxes` implemented with optional numbered labels.
+- [x] **C. Few-shot dataset and loader** — `COCOFewShotDataset` + `get_coco_few_shot_dataloader`.
+- [x] **D. Prompt package scaffold** — `prompts/` package with four strategy modules and strategy registry.
+- [x] **E. Model API extension** — `BaseVLM.predict_few_shot` and multi-image paths in Qwen/InternVL.
+- [x] **F. Evaluation + entry wiring** — `FewShotExperiment`, config knobs, and `main.py` mode switch.
+- [~] **D/E strategy fidelity gaps** — `text_from_vision` is currently single-pass prompting (not full two-pass describe→detect yet), and `set_of_mark` does not yet implement query-region proposal/index selection.
+- [ ] **Experiments + reporting** — run 1-shot/5-shot sweeps and document comparative metrics vs zero-shot baselines.
+
 ### A. Support pool and sampling
 
 1. Define a **`SupportExample`** dataclass: `image_id`, PIL `image`, list of COCO-format bboxes for the target class, `category_id`, optional `class_name`.
