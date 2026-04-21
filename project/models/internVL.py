@@ -71,7 +71,6 @@ class InternVL2_5_8B(BaseVLM):
         super().__init__(device)
         self.model_name = "InternVL2.5-8B"
         self.model_id = "OpenGVLab/InternVL2_5-8B"
-        self.icl_strategy = None
 
         # Flash Attention is generally unsupported on MPS or CPU backends.
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -115,20 +114,16 @@ class InternVL2_5_8B(BaseVLM):
             
         return boxes
 
-    def predict(self, image, target_class: str, img_width: int, img_height: int, support_examples: list = None) -> list:
-        if isinstance(image, str):
-            image = Image.open(image).convert('RGB')
-        elif getattr(image, 'mode', None) != 'RGB':
-            image = image.convert('RGB')
-
-        if self.icl_strategy and support_examples:
-            structured_inputs = self.icl_strategy.apply(image, target_class, support_examples)
-        else:
-            structured_inputs = [{
+    def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
+        structured_inputs = [
+            {
                 "image": image,
-                "text": f"Please provide the bounding box coordinates of the region this sentence describes: Detect all {target_class}.",
-            }]
-
+                "text": (
+                    "Please provide the bounding box coordinates of the region this sentence "
+                    f"describes: Detect all {target_class}."
+                ),
+            }
+        ]
         return self._run_structured_inputs(structured_inputs, img_width, img_height)
 
     def _prepare_multi_image_pixels(
@@ -192,7 +187,9 @@ class InternVL2_5_8B(BaseVLM):
         img_width: int,
         img_height: int,
     ) -> list:
-        images = list(support_images) + [query_image]
-        image_tokens = "".join("<image>\n" for _ in images)
-        question = f"{image_tokens}{prompt_text}"
-        return self._run_with_images(images, question, img_width, img_height)
+        structured_inputs = [
+            {"image": support_image, "text": "Reference support example."}
+            for support_image in support_images
+        ]
+        structured_inputs.append({"image": query_image, "text": prompt_text})
+        return self._run_structured_inputs(structured_inputs, img_width, img_height)
