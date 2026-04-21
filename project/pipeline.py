@@ -237,6 +237,18 @@ class FewShotExperiment(Experiment):
                     support_images = prompt_bundle["images"][:-1]
                     prompt_text = prompt_bundle["text"]
                     query_for_model = prompt_bundle["images"][-1]
+                    logger.info(
+                        (
+                            "[few_shot_input_debug] model=%s prompt_strategy=%s image_id=%s "
+                            "category_id=%s class_name=%r support_images=%s"
+                        ),
+                        self.model.model_name,
+                        self.prompt_strategy_name,
+                        image_id,
+                        cat_id,
+                        class_name,
+                        len(support_images),
+                    )
 
                     try:
                         boxes = self.model.predict_few_shot(
