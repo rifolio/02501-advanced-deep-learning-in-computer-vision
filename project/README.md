@@ -8,6 +8,8 @@ Navigate to `./project` and run:
 uv sync
 ```
 
+Run Python commands via `uv run ...` so the project environment is used consistently.
+
 ## COCO data (official download — no Google Drive)
 
 Val2017 images and annotations are fetched from [cocodataset.org](https://cocodataset.org/#download) over HTTPS (no OAuth).
@@ -61,3 +63,46 @@ Schema and details: [`data/splits/README.md`](data/splits/README.md).
 ```bash
 bsub < jobscript.sh
 ```
+
+## Run evaluations (zero-shot / few-shot)
+
+The entrypoint is `main.py`. Use `.env` (or exported env vars) to select mode/model.
+
+Example `.env` values:
+
+```bash
+# Common
+MODEL_NAME=qwen               # qwen | internvl | grounding_dino
+EVAL_SPLIT_PATH=data/splits/val_pilot.json
+
+# Mode switch
+EXPERIMENT_MODE=zero_shot     # zero_shot | few_shot
+
+# Few-shot only
+K_SHOT=3
+FEW_SHOT_SEED=42
+PROMPT_STRATEGY=side_by_side  # side_by_side | cropped_exemplars | text_from_vision | set_of_mark
+```
+
+Run:
+
+```bash
+uv run python main.py
+```
+
+## Visual few-shot preview images
+
+To inspect concrete support/query examples and bounding-box overlays, generate preview PNGs:
+
+```bash
+uv run python scripts/preview_few_shot_examples.py \
+  --cat-id 17 \
+  --k-shot 3 \
+  --eval-split data/splits/val_pilot.json \
+  --out-dir outputs/few_shot_preview
+```
+
+This saves:
+- per-support annotated images (`support_*.png`)
+- query image (`query_*.png`)
+- stitched side-by-side prompt sheet (`side_by_side_*.png`)
