@@ -18,7 +18,11 @@ class Experiment:
         wandb_cfg = {
             "model": self.model.model_name,
             "dataset": self.dataset_name,
+            "settings_model_name": settings.model_name,
+            "experiment_mode": settings.experiment_mode,
         }
+        if settings.eval_split_path:
+            wandb_cfg["eval_split_path"] = settings.eval_split_path
         ds = self.dataloader.dataset
         man = getattr(ds, "manifest", None)
         if man is not None:
@@ -27,8 +31,6 @@ class Experiment:
             wandb_cfg["eval_cat_ids"] = (
                 man.eval_cat_ids if man.eval_cat_ids is not None else "all_80"
             )
-            if settings.eval_split_path:
-                wandb_cfg["eval_split_path"] = settings.eval_split_path
 
         wandb.init(
             project=self.project_name,
@@ -111,7 +113,8 @@ class FewShotExperiment(Experiment):
             {
                 "k_shot": self.k_shot,
                 "prompt_strategy": self.prompt_strategy_name,
-                "experiment_mode": "few_shot",
+                "experiment_mode": settings.experiment_mode,
+                "settings_model_name": settings.model_name,
             }
         )
 

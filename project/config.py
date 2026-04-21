@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 import wandb
-from pydantic import field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -15,17 +15,38 @@ class Settings(BaseSettings):
     ann_file: str = "data/coco/annotations/instances_val2017.json"
     img_dir: str = "data/coco/val2017"
     # Relative to cwd (run from project/), or absolute: JSON from scripts/build_eval_split.py
-    eval_split_path: Optional[str] = None
-    api_key: str = ""
+    eval_split_path: Optional[str] = Field(
+        default=None,
+        validation_alias=AliasChoices("EVAL_SPLIT_PATH", "eval_split_path"),
+    )
+    api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("API_KEY", "api_key"),
+    )
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
     log_level: int = logging.INFO
-    experiment_mode: str = "zero_shot"
-    model_name: str = "qwen"
-    k_shot: int = 1
-    few_shot_seed: int = 42
-    prompt_strategy: str = "side_by_side"
+    experiment_mode: str = Field(
+        default="zero_shot",
+        validation_alias=AliasChoices("EXPERIMENT_MODE", "experiment_mode"),
+    )
+    model_name: str = Field(
+        default="qwen",
+        validation_alias=AliasChoices("MODEL_NAME", "model_name"),
+    )
+    k_shot: int = Field(
+        default=1,
+        validation_alias=AliasChoices("K_SHOT", "k_shot"),
+    )
+    few_shot_seed: int = Field(
+        default=42,
+        validation_alias=AliasChoices("FEW_SHOT_SEED", "few_shot_seed"),
+    )
+    prompt_strategy: str = Field(
+        default="side_by_side",
+        validation_alias=AliasChoices("PROMPT_STRATEGY", "prompt_strategy"),
+    )
 
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
     @field_validator("eval_split_path", mode="before")
     @classmethod
@@ -47,6 +68,15 @@ settings = Settings()
 logging.basicConfig(level=settings.log_level)
 logger.info(f'Using device: {settings.device}')
 logger.info(f"Using dataset: {settings.data_dir}")
+logger.info(
+    "Runtime selection: model_name=%s experiment_mode=%s k_shot=%s prompt_strategy=%s",
+    settings.model_name,
+    settings.experiment_mode,
+    settings.k_shot,
+    settings.prompt_strategy,
+)
+if settings.eval_split_path:
+    logger.info("Runtime selection: eval_split_path=%s", settings.eval_split_path)
 
 if settings.api_key:
     wandb.login(key=settings.api_key)
