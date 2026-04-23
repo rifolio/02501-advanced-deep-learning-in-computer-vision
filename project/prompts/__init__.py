@@ -3,6 +3,7 @@ from .cropped_exemplars import CroppedExemplarsStrategy
 from .set_of_mark import SetOfMarkStrategy
 from .side_by_side import SideBySideStrategy
 from .text_from_vision import TextFromVisionStrategy
+from .vlm_text_generation import VLMTextGenerationStrategy
 
 
 def get_prompt_strategy(name: str) -> PromptStrategy:
@@ -11,6 +12,7 @@ def get_prompt_strategy(name: str) -> PromptStrategy:
         "cropped_exemplars": CroppedExemplarsStrategy,
         "text_from_vision": TextFromVisionStrategy,
         "set_of_mark": SetOfMarkStrategy,
+        "vlm_text_generation": VLMTextGenerationStrategy,
     }
     if name not in strategy_map:
         valid = ", ".join(sorted(strategy_map))

@@ -3,6 +3,7 @@ from data.dataloaders import get_coco_dataloader, get_coco_few_shot_dataloader
 from models.qwen import Qwen2_5_VL
 from models.internVL import InternVL2_5_8B
 from models.grounding_dino import GroundingDINO
+from models.vlm_dino_fusion import VLMDINOFusion
 
 from pipeline import Experiment, FewShotExperiment
 
@@ -50,8 +51,8 @@ def _get_model():
     if model_name == "internvl":
         return InternVL2_5_8B(device=settings.device)
     if model_name == "grounding_dino":
-        return GroundingDINO(device=settings.device)
-    raise ValueError("model_name must be one of: qwen, internvl, grounding_dino")
+        return GroundingDINO(device=settings.device)    if model_name == "vlm_dino_fusion":
+        return VLMDINOFusion(device=settings.device)    raise ValueError("model_name must be one of: qwen, internvl, grounding_dino")
 
 
 def main():
