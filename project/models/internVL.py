@@ -1,12 +1,13 @@
 import re
 import logging
 import hashlib
+import os
 import torch
 import torchvision.transforms as T
 from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoTokenizer, AutoModel
-
+from config import settings
 from .base_vlm import BaseVLM
 
 logger = logging.getLogger(__name__)
@@ -69,12 +70,11 @@ def dynamic_preprocess(image, min_num=1, max_num=6, image_size=448, use_thumbnai
         
     return processed_images
 
-
 class InternVL2_5_8B(BaseVLM):
     def __init__(self, device: str):
         super().__init__(device)
-        self.model_name = "InternVL2.5-8B"
-        self.model_id = "OpenGVLab/InternVL2_5-8B"
+        self.model_name = "InternVL2.5-1B"
+        self.model_id = "OpenGVLab/InternVL2_5-1B"
 
         # Flash Attention is generally unsupported on MPS or CPU backends.
         self.tokenizer = AutoTokenizer.from_pretrained(
@@ -140,8 +140,15 @@ class InternVL2_5_8B(BaseVLM):
         image_count: int,
     ) -> None:
         prompt_hash = hashlib.sha1(question.encode("utf-8")).hexdigest()[:12]
-        prompt_snippet = question.strip().replace("\n", " ")[:120]
-        output_snippet = output_text.strip().replace("\n", " ")[:180]
+        ######
+        full_text = settings.vlm_log_full_text        
+        prompt_clean = question.strip().replace("\n", " ")
+        output_clean = output_text.strip().replace("\n", " ")
+        prompt_snippet = prompt_clean if full_text else prompt_clean[:120]
+        output_snippet = output_clean if full_text else output_clean[:180]
+        ######
+        # prompt_snippet = question.strip().replace("\n", " ")[:120]
+        # output_snippet = output_text.strip().replace("\n", " ")[:180]
         level = logging.INFO if parsed_box_count == 0 else logging.DEBUG
         logger.log(
             level,
@@ -164,7 +171,12 @@ class InternVL2_5_8B(BaseVLM):
                 "image": image,
                 "text": (
                     "Please provide the bounding box coordinates of the region this sentence "
-                    f"describes: Detect all {target_class}."
+                    f"describes: Detect all the instances of the following object: {target_class}.\n"
+                    "Return ONLY a Python-style list in this exact format: [[x1, y1, x2, y2], ...]\n"
+                    "Coordinates must be integers in [0, 1000].\n"
+                    "Use [x1, y1, x2, y2] with x1 < x2 and y1 < y2.\n"
+                    "Do not return words, labels, markdown, or explanations.\n"
+                    "If no instance is present, return [] exactly."
                 ),
             }
         ]
@@ -227,6 +239,7 @@ class InternVL2_5_8B(BaseVLM):
         structured_inputs: list[dict],
         img_width: int,
         img_height: int,
+        prompt = False
     ) -> list:
         images = [item["image"] for item in structured_inputs]
         prompt_parts = []

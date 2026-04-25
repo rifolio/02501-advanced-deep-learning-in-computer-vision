@@ -4,7 +4,7 @@ This enables the VLM-to-text pipeline for Task 3.
 """
 
 from __future__ import annotations
-
+from models.internVL import InternVL2_5_8B, build_transform, dynamic_preprocess, find_closest_aspect_ratio
 import logging
 from typing import Optional
 from PIL import Image
@@ -147,18 +147,34 @@ class VLMTextGenerator:
     ) -> str:
         """Generate description using InternVL2.5-8B."""
         try:
-            # InternVL requires different processing
-            # Stack images and use generate method
-            
             # For simplicity, process first image (can be extended to handle multiple)
             if not images:
                 return self._template_description("object")
             
-            # Use InternVL's generate interface (simplified approach)
-            # This would need to be implemented based on InternVL's actual API
-            logger.warning(
-                "InternVL text generation not yet fully implemented, using template"
-            )
+            pixel_values, num_patches_list = self.vlm_model._prepare_multi_image_pixels(images)
+            prompt_parts = []
+
+            for i in range(1, len(images)+1):
+                prompt_parts.append(f"Image-{i}: <image>")
+                #place a line-break in between prompt elements with the line-break as the glue/
+                # or separator between each item
+            prompt_parts.append(prompt)
+            question = "\n".join(prompt_parts)
+            generation_config = dict(max_new_tokens=256, do_sample=False)
+
+            with torch.no_grad():
+                output_text = self.vlm_model.model.chat(
+                    self.vlm_model.tokenizer,
+                    pixel_values,
+                    question,
+                    generation_config,
+                    num_patches_list,
+                    return_history=False,
+                )
+
+            
+            logger.info(f"InternVL generated description: {output_text[:100]}...")
+            return output_text.strip()
             return self._template_description("object")
             
         except Exception as e:

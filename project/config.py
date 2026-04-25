@@ -6,7 +6,7 @@ import torch
 import wandb
 from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
+import torch 
 logger = logging.getLogger(__name__)
 
 
@@ -24,7 +24,18 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("API_KEY", "api_key"),
     )
     device: str = "cuda" if torch.cuda.is_available() else "cpu"
-    log_level: int = logging.INFO
+    #log_level: int = logging.INFO
+    #####
+    log_level: int | str = Field(
+        default=logging.INFO,
+        validation_alias=AliasChoices("LOG_LEVEL", "log_level"),
+    )
+    
+    # 2. Add the VLM full text flag as a boolean
+    vlm_log_full_text: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VLM_LOG_FULL_TEXT", "vlm_log_full_text"),)
+    ####
     experiment_mode: str = Field(
         default="zero_shot",
         validation_alias=AliasChoices("EXPERIMENT_MODE", "experiment_mode"),
@@ -74,6 +85,16 @@ class Settings(BaseSettings):
         if v is None or v == "":
             return None
         return v
+    
+    ########
+    #validator to convert "DEBUG" from your .env into the logging module's integer
+    @field_validator("log_level", mode="before")
+    @classmethod
+    def parse_log_level(cls, v):
+        if isinstance(v, str) and not v.isdigit():
+            return getattr(logging, v.upper(), logging.INFO)
+        return int(v)
+    ########
 
     def resolved_eval_split_path(self) -> Path | None:
         if not self.eval_split_path:
