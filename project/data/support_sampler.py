@@ -4,7 +4,7 @@ import os
 import random
 from dataclasses import dataclass
 from typing import Optional
-
+import json
 from PIL import Image
 from pycocotools.coco import COCO
 
@@ -77,3 +77,83 @@ class SupportSetSampler:
             sampled_img_ids = [rng.choice(pool) for _ in range(k)]
 
         return [self._load_support_example(img_id, cat_id) for img_id in sampled_img_ids]
+
+class HFSupportSampler:
+    def __init__(self, hf_ann_file: str, hf_img_dir: str, seed: int = 42):
+        self.hf_img_dir = hf_img_dir
+        self.seed = seed
+        
+        with open(hf_ann_file, "r", encoding="utf-8") as f:
+            self.hf_annotations = json.load(f)
+
+        # Map standard MSCOCO cat_ids to your HF category IDs
+        self.coco_to_hf_map = {
+            1: 0,   # person
+            2: 1,   # bicycle
+            3: 2,   # car
+            4: 3,   # motorcycle
+            5: 4,   # airplane
+            6: 5,   # bus
+            7: 6,   # train
+            9: 8,   # boat
+            16: 14, # bird
+            17: 15, # cat
+            18: 16, # dog
+            19: 17, # horse
+            20: 18, # sheep
+            21: 19, # cow
+            44: 39, # bottle
+            62: 56, # chair
+            63: 57, # couch
+            64: 58, # potted plant
+            67: 60, # dining table
+            72: 62, # tv
+        }
+
+    def sample(self, cat_id: int, k: int) -> list[SupportExample]:
+        if k <= 0 or cat_id not in self.coco_to_hf_map:
+            return []
+
+        hf_target_id = self.coco_to_hf_map[cat_id]
+        valid_anns = []
+
+        # Find all images containing this specific HF category
+        for ann in self.hf_annotations:
+            if hf_target_id in ann["objects"]["category"]:
+                valid_anns.append(ann)
+
+        if not valid_anns:
+            return []
+
+        rng = random.Random(self.seed + int(cat_id))
+        
+        # Handle cases where we have fewer images than k
+        if len(valid_anns) >= k:
+            sampled_anns = rng.sample(valid_anns, k)
+        else:
+            sampled_anns = [rng.choice(valid_anns) for _ in range(k)]
+
+        support_examples = []
+        for ann in sampled_anns:
+            image_id = ann["image_id"]
+            img_path = os.path.join(self.hf_img_dir, ann["file_name"])
+            image = Image.open(img_path).convert("RGB")
+
+            # Extract only the boxes for the target category
+            objects = ann["objects"]
+            boxes = [
+                objects["bbox"][i]
+                for i, c_id in enumerate(objects["category"])
+                if c_id == hf_target_id
+            ]
+
+            support_examples.append(
+                SupportExample(
+                    image_id=image_id,
+                    image=image,
+                    boxes=boxes,
+                    category_id=cat_id,
+                )
+            )
+
+        return support_examples

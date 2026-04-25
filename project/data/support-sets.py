@@ -141,7 +141,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--classes",
         nargs="+",
-        required=True,
+        default=["all"],
+        #required=True,
         help='Classes to include, e.g. --classes car boat horse or --classes "car,boat".',
     )
     parser.add_argument(
@@ -152,10 +153,15 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
+    if "all" in args.classes:
+        eval_classes = COCO_NOVEL_CLASS_NAMES
+    else:
+        eval_classes = args.classes
+
     support_sets = build_class_support_sets(
         annotations_path=args.annotations_path,
         image_dir=args.image_dir,
-        target_classes=args.classes,
+        target_classes=eval_classes,
         k=args.k,
     )
     print(json.dumps(support_sets, indent=2))
