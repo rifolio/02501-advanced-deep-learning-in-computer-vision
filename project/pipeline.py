@@ -2,7 +2,7 @@ import json
 import logging
 from pathlib import Path
 from collections import defaultdict
-
+import torch
 import wandb
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
@@ -389,7 +389,8 @@ class FewShotExperiment(Experiment):
                         class_name,
                         len(support_images),
                     )
-
+                    vram_used = torch.cuda.memory_allocated() / (1024**3)
+                    logger.info(f"VRAM before predicting {class_name}: {vram_used:.2f} GB")
                     try:
                         boxes = self.model.predict_few_shot(
                             query_for_model,
@@ -402,6 +403,8 @@ class FewShotExperiment(Experiment):
                         fallback_to_zero_shot_count += 1
                         fallback_reasons.add(str(e) or "predict_few_shot not implemented")
                         boxes = self.model.predict(query_for_model, class_name, img_w, img_h)
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
                     counters["parser_fallback_used"] += self._consume_runtime_stat("parser_fallback_used")
                     if not boxes:
                         counters["num_queries_zero_boxes"] += 1

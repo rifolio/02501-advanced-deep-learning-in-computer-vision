@@ -48,6 +48,19 @@ uv run python scripts/build_eval_split.py \
   --eval-novel-categories-only
 ```
 
+Alternative for no uv and other CUDA devices
+```bash
+CUDA_VISIBLE_DEVICES=1\
+EXPERIMENT_MODE=few_shot \
+MODEL_NAME=internvl \
+K_SHOT=3 \
+FEW_SHOT_SEED=42 \
+PROMPT_STRATEGY=side_by_side \
+EVAL_SPLIT_PATH=data/splits/val_novel20.json \
+python main.py
+```
+
+
 Then either set in `.env` (or environment):
 
 ```bash
