@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 from PIL import Image
-
+from config import settings  
 from data.support_sampler import SupportExample
 from .base_strategy import PromptStrategy
 
 
 class CroppedExemplarsStrategy(PromptStrategy):
 
-    def __init__(self, max_crops_total: int = 4):
-        self.max_crops_total = max_crops_total
+    def __init__(self, target_crop_count: int | None = None, min_crop_area: int = 1024):
+        self.target_crop_count = target_crop_count if target_crop_count is not None else settings.k_shot
+        self.min_crop_area = min_crop_area
 
     def build_prompt(
         self,
@@ -26,6 +27,8 @@ class CroppedExemplarsStrategy(PromptStrategy):
             for box in ex.boxes:
                 x, y, w, h = box
                 area = w * h
+                if area < self.min_crop_area:
+                    continue
                 candidate_crops.append({
                     "image": ex.image,
                     "box": box,
@@ -34,8 +37,8 @@ class CroppedExemplarsStrategy(PromptStrategy):
 
         #sort by descending area and keep only top K crops
         candidate_crops.sort(key=lambda item: item["area"], reverse=True)
-        top_candidates = candidate_crops[:self.max_crops_total]
-
+        top_candidates = candidate_crops[:self.target_crop_count]
+        
         images: list[Image.Image] = []
         for candidate in top_candidates:
                 x,y,w,h = candidate["box"]

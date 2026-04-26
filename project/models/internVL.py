@@ -89,9 +89,9 @@ class InternVL2_5_8B(BaseVLM):
             #load_in_8bit=True,
             low_cpu_mem_usage=True,
             use_flash_attn=True, #since we mostly use volta's we keep it false; if we use a100 we can set it to true and compile
-            #device_map="auto",           
+            device_map="auto",           
             trust_remote_code=True
-        ).eval().to(self.device)
+        ).eval()# .to(self.device)
         # REMOVED: .to(self.device) because device_map="auto" and load_in_8bit handle it; otherwise we delete them and add it
         logger.info(
             "Initialized model=%s model_id=%s device=%s",
@@ -147,8 +147,6 @@ class InternVL2_5_8B(BaseVLM):
         prompt_snippet = prompt_clean if full_text else prompt_clean[:120]
         output_snippet = output_clean if full_text else output_clean[:180]
         ######
-        # prompt_snippet = question.strip().replace("\n", " ")[:120]
-        # output_snippet = output_text.strip().replace("\n", " ")[:180]
         level = logging.INFO if parsed_box_count == 0 else logging.DEBUG
         logger.log(
             level,
@@ -191,13 +189,23 @@ class InternVL2_5_8B(BaseVLM):
         all_tiles = []
         num_patches_list = []
 
-        for image in images:
+        for i, image in enumerate(images):
             if isinstance(image, str):
                 image = Image.open(image).convert("RGB")
             elif getattr(image, "mode", None) != "RGB":
                 image = image.convert("RGB")
 
-            processed = dynamic_preprocess(image, image_size=448, use_thumbnail=True, max_num=max_num)
+            # If this is not the LAST image in the list, it is a support crop.
+            is_query_image = (i == len(images) - 1)
+            w, h = image.size
+            
+            # Restrict to 1 patch if it's a crop, OR if the original image is just naturally tiny
+            if not is_query_image or (w * h <= 448 * 448):
+                current_max_num = 1
+            else:
+                current_max_num = max_num
+
+            processed = dynamic_preprocess(image, image_size=448, use_thumbnail=True, max_num=current_max_num)
             num_patches_list.append(len(processed))
             all_tiles.extend(processed)
 

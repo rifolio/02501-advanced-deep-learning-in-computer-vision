@@ -389,8 +389,9 @@ class FewShotExperiment(Experiment):
                         class_name,
                         len(support_images),
                     )
-                    vram_used = torch.cuda.memory_allocated() / (1024**3)
-                    logger.info(f"VRAM before predicting {class_name}: {vram_used:.2f} GB")
+                    #auxiliary VRAM checking
+                    #vram_used = torch.cuda.memory_allocated() / (1024**3)
+                    #logger.info(f"VRAM before predicting {class_name}: {vram_used:.2f} GB")
                     try:
                         boxes = self.model.predict_few_shot(
                             query_for_model,
