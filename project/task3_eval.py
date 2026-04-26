@@ -8,11 +8,17 @@ Demonstrates the VLM-to-text pipeline:
 3. Grounding DINO uses these descriptions to detect objects in query images
 4. Evaluates performance on COCO validation set
 
+IMPORTANT: To use your created subset (val_pilot.json), set:
+    export EVAL_SPLIT_PATH=data/splits/val_pilot.json
+
 Run with:
     uv run python task3_eval.py
     
 Or with custom config:
-    uv run python task3_eval.py --k-shot 2 --eval-split-path data/splits/val_pilot.json
+    EVAL_SPLIT_PATH=data/splits/val_pilot.json uv run python task3_eval.py --k-shot 2
+    
+The support sets are sampled from the full COCO dataset (not the subset).
+The evaluation (query images) uses your specified subset.
 """
 
 from __future__ import annotations
@@ -199,18 +205,25 @@ class Task3Experiment(FewShotExperiment):
 def main():
     """Main entry point for Task 3 evaluation."""
     # Validate configuration
-    if not settings.eval_split_path:
+    eval_split = settings.resolved_eval_split_path()
+    
+    if eval_split:
+        logger.info(f"✓ Using subset for EVALUATION: {eval_split}")
+    else:
         logger.warning(
-            "No eval split specified. Using full COCO validation set. "
-            "To use the created subset, set: EVAL_SPLIT_PATH=data/splits/val_pilot.json"
+            "✗ No eval split specified. Using full COCO validation set. "
+            "To use your subset, set: EVAL_SPLIT_PATH=data/splits/val_pilot.json"
         )
     
-    logger.info(f"Using device: {settings.device}")
-    logger.info(f"Model: vlm_dino_fusion")
+    logger.info(f"✓ Using full COCO dataset for SUPPORT SAMPLING")
+    logger.info(f"  (Support examples will be sampled from full dataset, excluding eval images)")
+    
+    logger.info(f"Device: {settings.device}")
+    logger.info(f"Model: vlm_dino_fusion (VLM: Qwen2.5-VL-7B + Detector: Grounding DINO)")
     logger.info(f"K-shot: {settings.k_shot}")
     logger.info(f"Experiment mode: few_shot")
     
-    # Get dataloader
+    # Get dataloader - uses eval_split_path if set
     test_loader = get_coco_few_shot_dataloader(k_shot=settings.k_shot)
     
     # Configure experiment
@@ -227,8 +240,8 @@ def main():
     )
     experiment.run_evaluation()
     
-    logger.info("\nTask 3 evaluation complete!")
-    logger.info(f"Results logged to WandB: {experiment.project_name}")
+    logger.info("\n✓ Task 3 evaluation complete!")
+    logger.info(f"  Results logged to WandB: {experiment.project_name}")
 
 
 if __name__ == "__main__":
