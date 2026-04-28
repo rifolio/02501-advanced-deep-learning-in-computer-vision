@@ -56,6 +56,10 @@ class VLMDINOFusion(BaseVLM):
         
         # Initialize text generator
         self.text_generator = VLMTextGenerator(self.vlm)
+
+    @staticmethod
+    def _extract_bboxes(scored_predictions: list[dict]) -> list:
+        return [prediction["bbox"] for prediction in scored_predictions]
     
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
         """
@@ -72,9 +76,26 @@ class VLMDINOFusion(BaseVLM):
         """
         # Generate description without support examples
         description = self.text_generator._template_description(target_class)
-        
-        # Use Grounding DINO with generated description
-        return self.dino.predict(image, description, img_width, img_height)
+        scored_predictions = self.dino.predict_with_scores(
+            image,
+            description,
+            img_width,
+            img_height,
+        )
+        return self._extract_bboxes(scored_predictions)
+
+    def predict_with_scores(
+        self,
+        image,
+        target_class: str,
+        img_width: int,
+        img_height: int,
+    ) -> list[dict]:
+        """
+        Score-aware API that preserves detector confidences.
+        """
+        description = self.text_generator._template_description(target_class)
+        return self.dino.predict_with_scores(image, description, img_width, img_height)
     
     def predict_few_shot(
         self,
@@ -102,9 +123,29 @@ class VLMDINOFusion(BaseVLM):
         Returns:
             List of bounding boxes in COCO format [x, y, width, height]
         """
+        scored_predictions = self.predict_few_shot_with_scores(
+            query_image,
+            support_images,
+            prompt_text,
+            img_width,
+            img_height,
+        )
+        return self._extract_bboxes(scored_predictions)
+
+    def predict_few_shot_with_scores(
+        self,
+        query_image,
+        support_images: list,
+        prompt_text: str,
+        img_width: int,
+        img_height: int,
+    ) -> list[dict]:
+        """
+        Few-shot score-aware API that preserves detector confidences.
+        """
         if not support_images:
             logger.info("No support images provided, using zero-shot detection")
-            return self.predict(query_image, prompt_text, img_width, img_height)
+            return self.predict_with_scores(query_image, prompt_text, img_width, img_height)
         
         # Extract class name from prompt (e.g., "Detect all dogs" → "dogs")
         class_name = self._extract_class_name(prompt_text)
@@ -134,14 +175,14 @@ class VLMDINOFusion(BaseVLM):
         
         # Step 2: Use Grounding DINO with generated description
         try:
-            boxes = self.dino.predict(
+            scored_predictions = self.dino.predict_with_scores(
                 query_image,
                 generated_description,
                 img_width,
                 img_height,
             )
             self._bump_runtime_stat("dino_predictions_made")
-            return boxes
+            return scored_predictions
             
         except Exception as e:
             logger.error(f"Grounding DINO detection failed: {e}")

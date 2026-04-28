@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 
 from torch.utils.data import DataLoader
+from pycocotools.coco import COCO
 
 from config import settings
 from data.eval_split import load_eval_split
@@ -97,13 +98,31 @@ def get_coco_few_shot_dataloader(batch_size=1, num_workers=4, k_shot: int = 1):
     manifest = _load_manifest_for_dataset()
     image_ids = manifest.image_ids if manifest else None
     eval_cat_ids = set(manifest.eval_cat_ids) if manifest and manifest.eval_cat_ids else None
+    excluded_ids: set[int] = set(image_ids) if image_ids else set()
+    excluded_filenames: set[str] = set()
+
+    if excluded_ids:
+        coco = COCO(settings.ann_file)
+        img_infos = coco.loadImgs(list(excluded_ids))
+        excluded_filenames = {str(info["file_name"]) for info in img_infos}
 
     # Wire in the custom HF sampler for novel classes
     support_sampler = HFSupportSampler(
         hf_ann_file="data/coco_novel_10_shot/hf_subset_annotations.json",
         hf_img_dir="data/coco_novel_10_shot",
         seed=settings.few_shot_seed,
+        excluded_image_ids=excluded_ids,
+        excluded_filenames=excluded_filenames,
     )
+    if manifest:
+        overlap = support_sampler.audit_exclusion_overlap()
+        if overlap["overlapping_image_ids"] or overlap["overlapping_filenames"]:
+            logger.warning(
+                "Few-shot support overlap audit: found %d image_id overlap(s) and %d filename overlap(s) "
+                "between eval split and HF support pool; excluded from support sampling.",
+                overlap["overlapping_image_ids"],
+                overlap["overlapping_filenames"],
+            )
 
     dataset = COCOFewShotDataset(
         ann_file=settings.ann_file,

@@ -26,7 +26,20 @@ def _get_model():
     raise ValueError("model_name must be one of: qwen, internvl, grounding_dino")
 
 
+def _validate_runtime_configuration() -> None:
+    is_few_shot = settings.experiment_mode.lower() == "few_shot"
+    prompt_strategy = settings.prompt_strategy.lower()
+    if is_few_shot and prompt_strategy == "verification":
+        raise ValueError(
+            "Invalid configuration: prompt_strategy='verification' is not supported in the bbox "
+            "detection few-shot pipeline. Use a detection strategy "
+            "('side_by_side', 'cropped_exemplars', 'text_from_vision', 'set_of_mark', "
+            "'vlm_text_generation') or run the dedicated verification pipeline."
+        )
+
+
 def main():
+    _validate_runtime_configuration()
     is_few_shot = settings.experiment_mode.lower() == "few_shot"
     project_name = "VLM_FewShot_Detection" if is_few_shot else "VLM_ZeroShot_Detection"
     dataset = settings.data_dir.split("/")[-1]

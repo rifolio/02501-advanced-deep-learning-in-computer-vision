@@ -2,6 +2,7 @@ import re
 import logging
 import hashlib
 import os
+import math
 import torch
 import torchvision.transforms as T
 from PIL import Image
@@ -102,34 +103,63 @@ class InternVL2_5_8B(BaseVLM):
 
     def _parse_boxes(self, text: str, img_width: int, img_height: int) -> tuple[list, bool]:
         boxes = []
-        
-        # InternVL outputs grounding coordinates in a [0, 1000] normalized range
-        # formatted similarly to: <ref>class</ref><box>[[x1, y1, x2, y2]]</box>
-        pattern = r"\[\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]"
-        matches = re.findall(pattern, text)
         parser_fallback_used = False
 
-        if not matches:
-            # Fallback for decimal coordinates and nested brackets.
-            fallback_pattern = r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
-            matches = re.findall(fallback_pattern, text)
+        # InternVL outputs grounding coordinates in a [0, 1000] normalized range,
+        # typically inside <box>...</box>. Parse those regions first to avoid
+        # accidentally matching unrelated number lists in free-form text.
+        int_pattern = r"\[\s*\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\s*\]"
+        fallback_pattern = (
+            r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
+            r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
+        )
+        matches = []
+        box_payloads = re.findall(r"<box>(.*?)</box>", text, flags=re.DOTALL)
+
+        if box_payloads:
+            for payload in box_payloads:
+                matches.extend(re.findall(int_pattern, payload))
+            if not matches:
+                for payload in box_payloads:
+                    matches.extend(re.findall(fallback_pattern, payload))
+                parser_fallback_used = bool(matches)
+        else:
+            # Stricter fallback: only parse nested list blocks (e.g. [[...], [...]]).
+            # This avoids capturing unrelated 4-number arrays in descriptive text.
+            fallback_blocks = re.findall(r"\[\s*\[.*?\]\s*\]", text, flags=re.DOTALL)
+            for block in fallback_blocks:
+                matches.extend(re.findall(fallback_pattern, block))
             parser_fallback_used = bool(matches)
-        
+
+        x_bound = max(0.0, float(img_width))
+        y_bound = max(0.0, float(img_height))
         for match in matches:
             xmin, ymin, xmax, ymax = map(float, match)
-            
+            if not all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax)):
+                continue
+
             # Map the normalized [0, 1000] space back to absolute pixel dimensions
-            abs_xmin = (xmin / 1000.0) * img_width
-            abs_ymin = (ymin / 1000.0) * img_height
-            abs_xmax = (xmax / 1000.0) * img_width
-            abs_ymax = (ymax / 1000.0) * img_height
-            
+            abs_xmin = max(0.0, min((xmin / 1000.0) * img_width, x_bound))
+            abs_ymin = max(0.0, min((ymin / 1000.0) * img_height, y_bound))
+            abs_xmax = max(0.0, min((xmax / 1000.0) * img_width, x_bound))
+            abs_ymax = max(0.0, min((ymax / 1000.0) * img_height, y_bound))
+
+            # Drop degenerate or invalid boxes after clamping.
+            if abs_xmax <= abs_xmin or abs_ymax <= abs_ymin:
+                continue
+
             width = abs_xmax - abs_xmin
             height = abs_ymax - abs_ymin
-            
+
             boxes.append([abs_xmin, abs_ymin, width, height])
-            
+
         return boxes, parser_fallback_used
+
+    def _provisional_score_policy(self) -> str:
+        """
+        InternVL currently returns boxes without confidence logits.
+        """
+        return "internvl_box_only_rank_decay_v1"
 
     def _log_inference_debug(
         self,
@@ -231,6 +261,11 @@ class InternVL2_5_8B(BaseVLM):
         parsed_boxes, parser_fallback_used = self._parse_boxes(output_text, img_width, img_height)
         if parser_fallback_used:
             self._bump_runtime_stat("parser_fallback_used")
+            logger.info(
+                "[parser_debug] model=%s fallback_parser_used=true parsed_boxes=%s",
+                self.model_name,
+                len(parsed_boxes),
+            )
         if not parsed_boxes:
             self._bump_runtime_stat("queries_with_zero_boxes")
         self._log_inference_debug(
@@ -274,8 +309,14 @@ class InternVL2_5_8B(BaseVLM):
         )
         strict_prompt_text = f"{prompt_text.rstrip()}{strict_output_tail}"
         structured_inputs = [
-            {"image": support_image, "text": "Reference support example."}
-            for support_image in support_images
+            {
+                "image": support_image,
+                "text": (
+                    f"Support example {idx}: use this as visual grounding context for the task below.\n"
+                    f"{prompt_text.rstrip()}"
+                ),
+            }
+            for idx, support_image in enumerate(support_images, start=1)
         ]
         structured_inputs.append({"image": query_image, "text": strict_prompt_text})
         return self._run_structured_inputs(structured_inputs, img_width, img_height)

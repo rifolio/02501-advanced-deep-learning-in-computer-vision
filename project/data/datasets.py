@@ -29,6 +29,10 @@ class COCOZeroShotDataset(Dataset):
 
         cats = self.coco.loadCats(self.coco.getCatIds())
         self.cat_id_to_name = {cat["id"]: cat["name"] for cat in cats}
+        if self.eval_cat_ids is not None:
+            self.query_cat_ids = sorted(c for c in self.cat_id_to_name if c in self.eval_cat_ids)
+        else:
+            self.query_cat_ids = sorted(self.cat_id_to_name)
 
     def __len__(self):
         return len(self.img_ids)
@@ -55,6 +59,10 @@ class COCOZeroShotDataset(Dataset):
                     "class_name": self.cat_id_to_name[cat_id],
                 }
             )
+        query_targets = [
+            {"category_id": cat_id, "class_name": self.cat_id_to_name[cat_id]}
+            for cat_id in self.query_cat_ids
+        ]
 
         return {
             "image_id": img_id,
@@ -62,6 +70,7 @@ class COCOZeroShotDataset(Dataset):
             "width": img_info["width"],
             "height": img_info["height"],
             "targets": targets,
+            "query_targets": query_targets,
         }
 
 
@@ -90,6 +99,10 @@ class COCOFewShotDataset(Dataset):
 
         cats = self.coco.loadCats(self.coco.getCatIds())
         self.cat_id_to_name = {cat["id"]: cat["name"] for cat in cats}
+        if self.eval_cat_ids is not None:
+            self.query_cat_ids = sorted(c for c in self.cat_id_to_name if c in self.eval_cat_ids)
+        else:
+            self.query_cat_ids = sorted(self.cat_id_to_name)
 
     def __len__(self):
         return len(self.img_ids)
@@ -117,7 +130,12 @@ class COCOFewShotDataset(Dataset):
                     "class_name": self.cat_id_to_name[cat_id],
                 }
             )
+        for cat_id in self.query_cat_ids:
             support_by_cat[cat_id] = self.support_sampler.sample(cat_id, self.k_shot)
+        query_targets = [
+            {"category_id": cat_id, "class_name": self.cat_id_to_name[cat_id]}
+            for cat_id in self.query_cat_ids
+        ]
 
         return {
             "image_id": img_id,
@@ -125,5 +143,6 @@ class COCOFewShotDataset(Dataset):
             "width": img_info["width"],
             "height": img_info["height"],
             "targets": targets,
+            "query_targets": query_targets,
             "support_by_cat": support_by_cat,
         }

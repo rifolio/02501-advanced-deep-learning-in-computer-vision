@@ -58,6 +58,12 @@ class Qwen2_5_VL(BaseVLM):
             boxes.append([abs_xmin, abs_ymin, width, height])
         return boxes, parser_fallback_used
 
+    def _provisional_score_policy(self) -> str:
+        """
+        Qwen grounding text output does not include calibrated confidence.
+        """
+        return "qwen_box_only_rank_decay_v1"
+
     def _log_inference_debug(
         self,
         prompt_text: str,

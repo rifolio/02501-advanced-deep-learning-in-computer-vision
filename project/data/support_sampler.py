@@ -3,8 +3,9 @@ from __future__ import annotations
 import os
 import random
 from dataclasses import dataclass
-from typing import Optional
 import json
+from pathlib import Path
+from typing import Optional
 from PIL import Image
 from pycocotools.coco import COCO
 
@@ -79,12 +80,26 @@ class SupportSetSampler:
         return [self._load_support_example(img_id, cat_id) for img_id in sampled_img_ids]
 
 class HFSupportSampler:
-    def __init__(self, hf_ann_file: str, hf_img_dir: str, seed: int = 42):
+    def __init__(
+        self,
+        hf_ann_file: str,
+        hf_img_dir: str,
+        seed: int = 42,
+        excluded_image_ids: set[int] | None = None,
+        excluded_filenames: set[str] | None = None,
+    ):
         self.hf_img_dir = hf_img_dir
         self.seed = seed
-        
+        self.excluded_image_ids = excluded_image_ids or set()
+        self.excluded_filenames = excluded_filenames or set()
+        self._excluded_filename_basenames = {Path(name).name for name in self.excluded_filenames}
+
         with open(hf_ann_file, "r", encoding="utf-8") as f:
             self.hf_annotations = json.load(f)
+
+        self._hf_image_ids = {int(ann["image_id"]) for ann in self.hf_annotations}
+        self._hf_filenames = {str(ann["file_name"]) for ann in self.hf_annotations}
+        self._hf_filename_basenames = {Path(name).name for name in self._hf_filenames}
 
         # Map standard MSCOCO cat_ids to your HF category IDs
         self.coco_to_hf_map = {
@@ -110,6 +125,27 @@ class HFSupportSampler:
             72: 62, # tv
         }
 
+    def _is_excluded(self, ann: dict) -> bool:
+        image_id = int(ann["image_id"])
+        if image_id in self.excluded_image_ids:
+            return True
+
+        filename = str(ann["file_name"])
+        return filename in self.excluded_filenames or Path(filename).name in self._excluded_filename_basenames
+
+    def audit_exclusion_overlap(self) -> dict[str, int]:
+        overlapping_ids = self.excluded_image_ids.intersection(self._hf_image_ids)
+
+        overlapping_filenames: set[str] = set()
+        for name in self.excluded_filenames:
+            if name in self._hf_filenames or Path(name).name in self._hf_filename_basenames:
+                overlapping_filenames.add(name)
+
+        return {
+            "overlapping_image_ids": len(overlapping_ids),
+            "overlapping_filenames": len(overlapping_filenames),
+        }
+
     def sample(self, cat_id: int, k: int) -> list[SupportExample]:
         if k <= 0 or cat_id not in self.coco_to_hf_map:
             return []
@@ -119,6 +155,8 @@ class HFSupportSampler:
 
         # Find all images containing this specific HF category
         for ann in self.hf_annotations:
+            if self._is_excluded(ann):
+                continue
             if hf_target_id in ann["objects"]["category"]:
                 valid_anns.append(ann)
 

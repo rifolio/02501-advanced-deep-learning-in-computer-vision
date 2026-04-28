@@ -15,7 +15,7 @@ class GroundingDINO(BaseVLM):
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
 
-    def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
+    def _run_detection(self, image, target_class: str, img_width: int, img_height: int):
         # 1. Image Preprocessing
         if isinstance(image, str):
             image = Image.open(image).convert('RGB')
@@ -40,18 +40,37 @@ class GroundingDINO(BaseVLM):
             text_threshold=0.3,
             target_sizes=[(img_height, img_width)] 
         )
+        return results[0]
 
-        result = results[0]
-        coco_boxes = []
-        
-        # 5. Convert [xmin, ymin, xmax, ymax] to [x, y, width, height]
-        for box in result["boxes"]:
+    def predict_with_scores(
+        self,
+        image,
+        target_class: str,
+        img_width: int,
+        img_height: int,
+    ) -> list[dict]:
+        result = self._run_detection(image, target_class, img_width, img_height)
+        scored_predictions = []
+        boxes = result["boxes"]
+        scores = result.get("scores")
+
+        for idx, box in enumerate(boxes):
             xmin, ymin, xmax, ymax = box.tolist()
-            
             width = xmax - xmin
             height = ymax - ymin
-            
-            # Append in COCO format
-            coco_boxes.append([xmin, ymin, width, height])
-            
+            score = float(scores[idx].item()) if scores is not None else 0.0
+            scored_predictions.append(
+                {
+                    "bbox": [xmin, ymin, width, height],
+                    "score": score,
+                    "score_source": "model",
+                    "score_policy": "grounding_dino_postprocess",
+                }
+            )
+        return scored_predictions
+
+    def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
+        coco_boxes = []
+        for prediction in self.predict_with_scores(image, target_class, img_width, img_height):
+            coco_boxes.append(prediction["bbox"])
         return coco_boxes

@@ -23,6 +23,8 @@ class TextFromVisionStrategy(PromptStrategy):
         images = annotated_supports + [query_image]
         text = (
             f"From the marked support images, infer visual properties of {class_name}. "
-            f"Then detect all {class_name} in the last image and return boxes in [x, y, w, h]."
+            f"Then detect all {class_name} in the last image and return ONLY a JSON array of boxes "
+            f"formatted as [[x1,y1,x2,y2], ...], with coordinates normalized to [0,1000]. "
+            f"Use x1 < x2 and y1 < y2. Return [] if none are present."
         )
         return {"images": images, "text": text}

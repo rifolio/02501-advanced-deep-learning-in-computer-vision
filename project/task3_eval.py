@@ -23,6 +23,7 @@ The evaluation (query images) uses your specified subset.
 
 from __future__ import annotations
 
+import json
 import logging
 import sys
 from pathlib import Path
@@ -101,9 +102,6 @@ class Task3Experiment(FewShotExperiment):
         for batch in tqdm(self.dataloader, desc="Task 3: VLM→Text→DINO"):
             for item in batch:
                 counters["num_items_total"] += 1
-                if not item["targets"]:
-                    counters["num_items_skipped_no_targets"] += 1
-                    continue
 
                 image_id = item["image_id"]
                 evaluated_image_ids.append(int(image_id))
@@ -111,12 +109,10 @@ class Task3Experiment(FewShotExperiment):
                 img_w, img_h = item["width"], item["height"]
                 support_by_cat = item.get("support_by_cat", {})
 
-                unique_classes = {
-                    target["category_id"]: target["class_name"]
-                    for target in item["targets"]
-                }
-                
-                for cat_id, class_name in unique_classes.items():
+                query_targets = item.get("query_targets", [])
+                for target in query_targets:
+                    cat_id = target["category_id"]
+                    class_name = target["class_name"]
                     counters["num_class_queries"] += 1
                     
                     # Get support examples for this category
@@ -144,7 +140,7 @@ class Task3Experiment(FewShotExperiment):
                     # 1. Use VLM to generate description from support_images
                     # 2. Use Grounding DINO with generated description
                     try:
-                        boxes = self.model.predict_few_shot(
+                        scored_predictions = self.model.predict_few_shot_with_scores(
                             query_for_model,
                             support_images,
                             prompt_text,
@@ -169,21 +165,21 @@ class Task3Experiment(FewShotExperiment):
                         
                     except NotImplementedError as e:
                         logger.error(f"Model error: {e}")
-                        boxes = []
+                        scored_predictions = []
                     
-                    if not boxes:
+                    if not scored_predictions:
                         counters["num_queries_zero_boxes"] += 1
                         logger.info(
                             f"[Task3_Zero_Detections] image_id={image_id}, "
                             f"class={class_name}, support_images={len(support_images)}"
                         )
 
-                    for box in boxes:
+                    for prediction in scored_predictions:
                         results.append({
                             "image_id": image_id,
                             "category_id": cat_id,
-                            "bbox": box,
-                            "score": 1.0,
+                            "bbox": prediction["bbox"],
+                            "score": float(prediction["score"]),
                         })
                         counters["num_predictions_written"] += 1
 
@@ -199,7 +195,14 @@ class Task3Experiment(FewShotExperiment):
         logger.info("=" * 80)
 
         # Save results and evaluate
-        self._evaluate_and_log(results, evaluated_image_ids, counters)
+        result_file = f"{self.model.model_name}_task3_results.json"
+        with open(result_file, "w", encoding="utf-8") as f:
+            json.dump(results, f)
+        self._log_run_diagnostics(result_file, counters)
+        wandb.log(generation_stats)
+        self._calculate_and_log_metrics(result_file)
+        self._maybe_log_viz_artifact(result_file, evaluated_image_ids)
+        wandb.finish()
 
 
 def main():

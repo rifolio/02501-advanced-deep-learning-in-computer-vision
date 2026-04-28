@@ -59,24 +59,19 @@ class Experiment:
         for batch in tqdm(self.dataloader, desc=f"Evaluating {self.model.model_name}"):
             for item in batch:
                 counters["num_items_total"] += 1
-                if not item["targets"]:
-                    counters["num_items_skipped_no_targets"] += 1
-                    continue
                 image_id = item["image_id"]
                 evaluated_image_ids.append(int(image_id))
                 image = item["image"]
                 img_w, img_h = item["width"], item["height"]
 
-                unique_classes = {
-                    target["category_id"]: target["class_name"]
-                    for target in item["targets"]
-                }
-
-                for cat_id, class_name in unique_classes.items():
+                query_targets = item.get("query_targets", [])
+                for target in query_targets:
+                    cat_id = target["category_id"]
+                    class_name = target["class_name"]
                     counters["num_class_queries"] += 1
-                    boxes = self.model.predict(image, class_name, img_w, img_h)
+                    scored_predictions = self.model.predict_with_scores(image, class_name, img_w, img_h)
                     counters["parser_fallback_used"] += self._consume_runtime_stat("parser_fallback_used")
-                    if not boxes:
+                    if not scored_predictions:
                         counters["num_queries_zero_boxes"] += 1
                         logger.info(
                             (
@@ -88,13 +83,13 @@ class Experiment:
                             cat_id,
                             class_name,
                         )
-                    for box in boxes:
+                    for prediction in scored_predictions:
                         results.append(
                             {
                                 "image_id": image_id,
                                 "category_id": cat_id,
-                                "bbox": box,
-                                "score": 1.0,
+                                "bbox": prediction["bbox"],
+                                "score": float(prediction["score"]),
                             }
                         )
                         counters["num_predictions_written"] += 1
@@ -323,6 +318,11 @@ class FewShotExperiment(Experiment):
         super().__init__(project_name, config)
         self.k_shot = settings.k_shot
         self.prompt_strategy_name = settings.prompt_strategy
+        if self.prompt_strategy_name.lower() == "verification":
+            raise ValueError(
+                "Invalid configuration: prompt_strategy='verification' cannot run in the bbox "
+                "detection few-shot pipeline. Run the dedicated verification pipeline instead."
+            )
         self.prompt_strategy = get_prompt_strategy(self.prompt_strategy_name)
         if wandb.run is not None:
             wandb.run.name = f"{self.model.model_name}_FewShot_{self.prompt_strategy_name}_{self.k_shot}shot"
@@ -352,9 +352,6 @@ class FewShotExperiment(Experiment):
         for batch in tqdm(self.dataloader, desc=f"Evaluating {self.model.model_name} (few-shot)"):
             for item in batch:
                 counters["num_items_total"] += 1
-                if not item["targets"]:
-                    counters["num_items_skipped_no_targets"] += 1
-                    continue
 
                 image_id = item["image_id"]
                 evaluated_image_ids.append(int(image_id))
@@ -362,11 +359,10 @@ class FewShotExperiment(Experiment):
                 img_w, img_h = item["width"], item["height"]
                 support_by_cat = item.get("support_by_cat", {})
 
-                unique_classes = {
-                    target["category_id"]: target["class_name"]
-                    for target in item["targets"]
-                }
-                for cat_id, class_name in unique_classes.items():
+                query_targets = item.get("query_targets", [])
+                for target in query_targets:
+                    cat_id = target["category_id"]
+                    class_name = target["class_name"]
                     counters["num_class_queries"] += 1
                     prompt_bundle = self.prompt_strategy.build_prompt(
                         query_image=query_image,
@@ -393,7 +389,7 @@ class FewShotExperiment(Experiment):
                     #vram_used = torch.cuda.memory_allocated() / (1024**3)
                     #logger.info(f"VRAM before predicting {class_name}: {vram_used:.2f} GB")
                     try:
-                        boxes = self.model.predict_few_shot(
+                        scored_predictions = self.model.predict_few_shot_with_scores(
                             query_for_model,
                             support_images,
                             prompt_text,
@@ -403,11 +399,16 @@ class FewShotExperiment(Experiment):
                     except NotImplementedError as e:
                         fallback_to_zero_shot_count += 1
                         fallback_reasons.add(str(e) or "predict_few_shot not implemented")
-                        boxes = self.model.predict(query_for_model, class_name, img_w, img_h)
+                        scored_predictions = self.model.predict_with_scores(
+                            query_for_model,
+                            class_name,
+                            img_w,
+                            img_h,
+                        )
                     if torch.cuda.is_available():
                         torch.cuda.empty_cache()
                     counters["parser_fallback_used"] += self._consume_runtime_stat("parser_fallback_used")
-                    if not boxes:
+                    if not scored_predictions:
                         counters["num_queries_zero_boxes"] += 1
                         logger.info(
                             (
@@ -421,13 +422,13 @@ class FewShotExperiment(Experiment):
                             len(support_images),
                         )
 
-                    for box in boxes:
+                    for prediction in scored_predictions:
                         results.append(
                             {
                                 "image_id": image_id,
                                 "category_id": cat_id,
-                                "bbox": box,
-                                "score": 1.0,
+                                "bbox": prediction["bbox"],
+                                "score": float(prediction["score"]),
                             }
                         )
                         counters["num_predictions_written"] += 1
