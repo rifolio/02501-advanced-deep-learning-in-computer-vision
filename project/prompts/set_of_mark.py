@@ -23,6 +23,12 @@ class SetOfMarkStrategy(PromptStrategy):
         images = annotated_supports + [query_image]
         text = (
             f"Support images show {class_name} with red marks. "
-            f"Use those references to detect {class_name} in the final image."
+            f"Use those references to detect {class_name} in the final image.\n"
+            "Return ONLY a JSON array of boxes in this exact format: [[x1,y1,x2,y2], ...]\n"
+            "Rules:\n"
+            "- Coordinates must be integers in [0,1000].\n"
+            "- Use x1 < x2 and y1 < y2.\n"
+            "- Do not return words, markdown, labels, or explanations.\n"
+            "- If no instance is present, return [] exactly."
         )
         return {"images": images, "text": text}

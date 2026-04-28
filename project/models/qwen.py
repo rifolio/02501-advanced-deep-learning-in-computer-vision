@@ -38,6 +38,16 @@ class Qwen2_5_VL(BaseVLM):
             matches = re.findall(fallback_pattern, text)
             parser_fallback_used = bool(matches)
 
+        if not matches:
+            # Secondary fallback for strict list output:
+            # [[x1,y1,x2,y2], ...]
+            list_pattern = (
+                r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
+                r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
+            )
+            matches = re.findall(list_pattern, text)
+            parser_fallback_used = bool(matches)
+
         # Processor resizes image sides to multiples of 28.
         resized_width = round(img_width / 28.0) * 28
         resized_height = round(img_height / 28.0) * 28
@@ -91,6 +101,17 @@ class Qwen2_5_VL(BaseVLM):
             output_snippet,
         )
 
+    @staticmethod
+    def _strict_output_tail() -> str:
+        return (
+            "\nOutput requirements:\n"
+            "Return ONLY a JSON array of boxes in this exact format: [[x1,y1,x2,y2], ...]\n"
+            "Coordinates must be integers in [0,1000].\n"
+            "Use x1 < x2 and y1 < y2.\n"
+            "Do not return words, labels, markdown, or explanations.\n"
+            "If no instance is present, return [] exactly."
+        )
+
     def _run_messages(self, content: list, img_width: int, img_height: int) -> list:
         messages = [
             {
@@ -135,7 +156,10 @@ class Qwen2_5_VL(BaseVLM):
         return parsed_boxes
 
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
-        prompt_text = f"Detect all {target_class} in this image."
+        prompt_text = (
+            f"Detect all {target_class} in this image."
+            f"{self._strict_output_tail()}"
+        )
         content = [
             {"type": "image", "image": image},
             {"type": "text", "text": prompt_text},
@@ -150,7 +174,8 @@ class Qwen2_5_VL(BaseVLM):
         img_width: int,
         img_height: int,
     ) -> list:
+        strict_prompt_text = f"{prompt_text.rstrip()}{self._strict_output_tail()}"
         content = [{"type": "image", "image": img} for img in support_images]
         content.append({"type": "image", "image": query_image})
-        content.append({"type": "text", "text": prompt_text})
+        content.append({"type": "text", "text": strict_prompt_text})
         return self._run_messages(content, img_width, img_height)
