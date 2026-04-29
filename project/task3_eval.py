@@ -139,6 +139,7 @@ class Task3Experiment(FewShotExperiment):
                             prompt_text,
                             img_w,
                             img_h,
+                            class_name=class_name,
                         )
                         
                         # Track model stats

@@ -22,11 +22,14 @@ class GroundingDINO(BaseVLM):
         elif getattr(image, 'mode', None) != 'RGB':
             image = image.convert('RGB')
 
-        # 2. Text Formatting (DINO expects a list of lists for batched inputs)
-        text_labels = [[target_class]]
+        # 2. Text Formatting — processor expects a single string (or List[str] for batch).
+        # Ensure the prompt ends with a period; Grounding DINO uses "." as a phrase separator.
+        text_prompt = target_class.strip()
+        if not text_prompt.endswith("."):
+            text_prompt += "."
 
         # 3. Model Inference
-        inputs = self.processor(images=image, text=text_labels, return_tensors="pt").to(self.device)
+        inputs = self.processor(images=image, text=text_prompt, return_tensors="pt").to(self.device)
         
         with torch.no_grad():
             outputs = self.model(**inputs)

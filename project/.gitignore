@@ -15,3 +15,5 @@ logs/
 
 data/coco/
 data/coco_novel_10_shot/
+
+*.DS_Store

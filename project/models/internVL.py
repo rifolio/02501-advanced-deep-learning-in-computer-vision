@@ -1,4 +1,5 @@
 import re
+import ast
 import logging
 import hashlib
 import math
@@ -127,13 +128,46 @@ class InternVL(BaseVLM):
                     matches.extend(re.findall(fallback_pattern, payload))
                 parser_fallback_used = bool(matches)
         else:
-            # Stricter fallback: only parse nested list blocks (e.g. [[...], [...]]).
-            # This avoids capturing unrelated 4-number arrays in descriptive text.
-            fallback_blocks = re.findall(r"\[\s*\[.*?\]\s*\]", text, flags=re.DOTALL)
-            for block in fallback_blocks:
-                matches.extend(re.findall(fallback_pattern, block))
+            # No <box> tags: use ast.literal_eval on the largest bracket expression
+            # to reliably handle [[x,y,x,y], ...] multi-box and flat [x,y,x,y] outputs.
+            matches = self._parse_boxes_ast(text)
             parser_fallback_used = bool(matches)
 
+        return self._scale_matches_to_boxes(matches, img_width, img_height), parser_fallback_used
+
+    @staticmethod
+    def _parse_boxes_ast(text: str) -> list[tuple]:
+        """Extract (xmin, ymin, xmax, ymax) tuples from raw text using ast.literal_eval."""
+        # Find the longest bracket-delimited substring to cover [[...],[...]] lists
+        best_candidates: list[str] = []
+        for m in re.finditer(r"\[[\s\S]*\]", text):
+            best_candidates.append(m.group(0))
+        # Sort by length descending so we try the largest first
+        best_candidates.sort(key=len, reverse=True)
+
+        for candidate in best_candidates:
+            try:
+                parsed = ast.literal_eval(candidate)
+            except (ValueError, SyntaxError):
+                continue
+
+            tuples: list[tuple] = []
+            if isinstance(parsed, list) and parsed:
+                if isinstance(parsed[0], (list, tuple)):
+                    for item in parsed:
+                        if isinstance(item, (list, tuple)) and len(item) == 4:
+                            tuples.append(tuple(item))
+                elif len(parsed) == 4 and all(isinstance(v, (int, float)) for v in parsed):
+                    tuples.append(tuple(parsed))
+            if tuples:
+                return tuples
+        return []
+
+    def _scale_matches_to_boxes(
+        self, matches: list, img_width: int, img_height: int,
+    ) -> list:
+        """Convert [0,1000]-normalized coordinate tuples to pixel-space COCO xywh."""
+        boxes = []
         x_bound = max(0.0, float(img_width))
         y_bound = max(0.0, float(img_height))
         for match in matches:
@@ -141,22 +175,19 @@ class InternVL(BaseVLM):
             if not all(math.isfinite(v) for v in (xmin, ymin, xmax, ymax)):
                 continue
 
-            # Map the normalized [0, 1000] space back to absolute pixel dimensions
             abs_xmin = max(0.0, min((xmin / 1000.0) * img_width, x_bound))
             abs_ymin = max(0.0, min((ymin / 1000.0) * img_height, y_bound))
             abs_xmax = max(0.0, min((xmax / 1000.0) * img_width, x_bound))
             abs_ymax = max(0.0, min((ymax / 1000.0) * img_height, y_bound))
 
-            # Drop degenerate or invalid boxes after clamping.
             if abs_xmax <= abs_xmin or abs_ymax <= abs_ymin:
                 continue
 
             width = abs_xmax - abs_xmin
             height = abs_ymax - abs_ymin
-
             boxes.append([abs_xmin, abs_ymin, width, height])
 
-        return boxes, parser_fallback_used
+        return boxes
 
     def _provisional_score_policy(self) -> str:
         """
@@ -301,6 +332,7 @@ class InternVL(BaseVLM):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        **kwargs,
     ) -> list:
         strict_output_tail = (
             "\nOutput requirements:\n"

@@ -76,7 +76,7 @@ class Experiment:
                         logger.info(
                             (
                                 "[query_debug] model=%s mode=zero_shot image_id=%s category_id=%s "
-                                "class_name=%r parsed_boxes=0"
+                                "class_name=%r num_predictions=0"
                             ),
                             self.model.model_name,
                             image_id,
@@ -251,10 +251,12 @@ class Experiment:
             draw_pred = ImageDraw.Draw(pred_panel)
 
             # Draw GT boxes for target category (if set) or all categories in the image.
+            # pycocotools treats catIds=None as [None] (matches nothing);
+            # an empty list [] means "no category filter" (matches all).
             if target_cat_id is not None:
                 gt_cat_ids = [target_cat_id]
             else:
-                gt_cat_ids = None
+                gt_cat_ids = []
             ann_ids = coco.getAnnIds(imgIds=[image_id], catIds=gt_cat_ids, iscrowd=None)
             anns = coco.loadAnns(ann_ids)
             for ann in anns:
@@ -395,6 +397,7 @@ class FewShotExperiment(Experiment):
                             prompt_text,
                             img_w,
                             img_h,
+                            class_name=class_name,
                         )
                     except NotImplementedError as e:
                         fallback_to_zero_shot_count += 1
@@ -413,7 +416,7 @@ class FewShotExperiment(Experiment):
                         logger.info(
                             (
                                 "[query_debug] model=%s mode=few_shot image_id=%s category_id=%s "
-                                "class_name=%r support_images=%s parsed_boxes=0"
+                                "class_name=%r support_images=%s num_predictions=0"
                             ),
                             self.model.model_name,
                             image_id,
