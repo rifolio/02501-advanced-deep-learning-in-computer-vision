@@ -23,49 +23,65 @@ class Qwen2_5_VL(BaseVLM):
 
     def _parse_boxes(self, text: str, img_width: int, img_height: int) -> tuple[list, bool]:
         boxes = []
-        # Qwen2.5 grounding output format:
-        # <|box_start|>(x1, y1), (x2, y2)<|box_end|>
-        pattern = r"<\|box_start\|>\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*,\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)<\|box_end\|>"
-        matches = re.findall(pattern, text)
         parser_fallback_used = False
 
+        # --- Pattern 1: native <|box_start|>(x1, y1), (x2, y2)<|box_end|> (integer) ---
+        native_pattern = r"<\|box_start\|>\(\s*(\d+)\s*,\s*(\d+)\s*\)\s*,\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)<\|box_end\|>"
+        matches = re.findall(native_pattern, text)
+        matched_format = "native"
+
         if not matches:
-            # Fallback: tolerate decimals and optional inner brackets.
-            fallback_pattern = (
+            # --- Pattern 2: native with decimals/brackets ---
+            fallback_native_pattern = (
                 r"<\|box_start\|>\(\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\)\s*,\s*"
                 r"\(\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\)<\|box_end\|>"
             )
-            matches = re.findall(fallback_pattern, text)
-            parser_fallback_used = bool(matches)
+            matches = re.findall(fallback_native_pattern, text)
+            if matches:
+                matched_format = "fallback_native"
+                parser_fallback_used = True
 
         if not matches:
-            # Secondary fallback for strict list output:
-            # [[x1,y1,x2,y2], ...]
+            # --- Pattern 3: list [[x1,y1,x2,y2], ...] -- coords are [0,1000]-normalized ---
             list_pattern = (
                 r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
                 r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
             )
             matches = re.findall(list_pattern, text)
-            parser_fallback_used = bool(matches)
+            if matches:
+                matched_format = "list_normalized"
+                parser_fallback_used = True
 
-        # Processor resizes image sides to multiples of 28.
-        resized_width = round(img_width / 28.0) * 28
-        resized_height = round(img_height / 28.0) * 28
+        if matched_format in ("native", "fallback_native"):
+            # Coords are in the resized pixel space (multiples of 28).
+            resized_width = round(img_width / 28.0) * 28
+            resized_height = round(img_height / 28.0) * 28
+            width_ratio = img_width / resized_width if resized_width > 0 else 1
+            height_ratio = img_height / resized_height if resized_height > 0 else 1
 
-        # Scale model output back to original dimensions.
-        width_ratio = img_width / resized_width if resized_width > 0 else 1
-        height_ratio = img_height / resized_height if resized_height > 0 else 1
+            for match in matches:
+                xmin, ymin, xmax, ymax = map(float, match)
+                abs_xmin = xmin * width_ratio
+                abs_ymin = ymin * height_ratio
+                abs_xmax = xmax * width_ratio
+                abs_ymax = ymax * height_ratio
+                if abs_xmax <= abs_xmin or abs_ymax <= abs_ymin:
+                    continue
+                boxes.append([abs_xmin, abs_ymin, abs_xmax - abs_xmin, abs_ymax - abs_ymin])
+        else:
+            # list_normalized: coords are in [0, 1000] normalized space.
+            x_bound = max(0.0, float(img_width))
+            y_bound = max(0.0, float(img_height))
+            for match in matches:
+                xmin, ymin, xmax, ymax = map(float, match)
+                abs_xmin = max(0.0, min((xmin / 1000.0) * img_width, x_bound))
+                abs_ymin = max(0.0, min((ymin / 1000.0) * img_height, y_bound))
+                abs_xmax = max(0.0, min((xmax / 1000.0) * img_width, x_bound))
+                abs_ymax = max(0.0, min((ymax / 1000.0) * img_height, y_bound))
+                if abs_xmax <= abs_xmin or abs_ymax <= abs_ymin:
+                    continue
+                boxes.append([abs_xmin, abs_ymin, abs_xmax - abs_xmin, abs_ymax - abs_ymin])
 
-        for match in matches:
-            xmin, ymin, xmax, ymax = map(float, match)
-
-            abs_xmin = xmin * width_ratio
-            abs_ymin = ymin * height_ratio
-            abs_xmax = xmax * width_ratio
-            abs_ymax = ymax * height_ratio
-            width = abs_xmax - abs_xmin
-            height = abs_ymax - abs_ymin
-            boxes.append([abs_xmin, abs_ymin, width, height])
         return boxes, parser_fallback_used
 
     def _provisional_score_policy(self) -> str:
