@@ -1,7 +1,6 @@
 import re
 import logging
 import hashlib
-import os
 import math
 import torch
 import torchvision.transforms as T
@@ -71,13 +70,17 @@ def dynamic_preprocess(image, min_num=1, max_num=6, image_size=448, use_thumbnai
         
     return processed_images
 
-class InternVL2_5_8B(BaseVLM):
-    def __init__(self, device: str):
+class InternVL(BaseVLM):
+    def __init__(
+        self,
+        device: str,
+        model_id: str = "OpenGVLab/InternVL2_5-1B",
+        model_name: str | None = None,
+    ):
         super().__init__(device)
-        self.model_name = "InternVL2.5-1B"
-        self.model_id = "OpenGVLab/InternVL2_5-1B"
+        self.model_id = model_id
+        self.model_name = model_name or model_id.split("/")[-1]
 
-        # Flash Attention is generally unsupported on MPS or CPU backends.
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_id, 
             trust_remote_code=True, 
@@ -320,3 +323,6 @@ class InternVL2_5_8B(BaseVLM):
         ]
         structured_inputs.append({"image": query_image, "text": strict_prompt_text})
         return self._run_structured_inputs(structured_inputs, img_width, img_height)
+
+
+InternVL2_5_8B = InternVL  # backward-compat alias

@@ -1,14 +1,13 @@
 from config import settings
 from data.dataloaders import get_coco_dataloader, get_coco_few_shot_dataloader
 from models.qwen import Qwen2_5_VL
-from models.internVL import InternVL2_5_8B
+from models.internVL import InternVL
 from models.grounding_dino import GroundingDINO
 from models.vlm_dino_fusion import VLMDINOFusion
 
 from pipeline import Experiment, FewShotExperiment
 
 import torch
-import torch.backends.cudnn as cudnn
 
 torch.backends.cudnn.benchmark = False
 torch.backends.cudnn.deterministic = True
@@ -18,12 +17,12 @@ def _get_model():
     if model_name == "qwen":
         return Qwen2_5_VL(device=settings.device)
     if model_name == "internvl":
-        return InternVL2_5_8B(device=settings.device)
+        return InternVL(device=settings.device)
     if model_name == "grounding_dino":
         return GroundingDINO(device=settings.device)    
     if model_name == "vlm_dino_fusion":
         return VLMDINOFusion(device=settings.device)    
-    raise ValueError("model_name must be one of: qwen, internvl, grounding_dino")
+    raise ValueError("model_name must be one of: qwen, internvl, grounding_dino, vlm_dino_fusion")
 
 
 def _validate_runtime_configuration() -> None:
