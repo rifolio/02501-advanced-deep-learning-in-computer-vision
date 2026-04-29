@@ -25,22 +25,15 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from pathlib import Path
 
-import torch
 import wandb
 from tqdm import tqdm
-from pycocotools.cocoeval import COCOeval
 
 from config import settings
 from data.dataloaders import get_coco_few_shot_dataloader
-from data.support_sampler import SupportSetSampler
 from models.vlm_dino_fusion import VLMDINOFusion
-from models.qwen import Qwen2_5_VL
-from models.grounding_dino import GroundingDINO
 from pipeline import FewShotExperiment
-from prompts import get_prompt_strategy
 
 logging.basicConfig(
     level=logging.INFO,
