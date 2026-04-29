@@ -20,7 +20,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 logging.basicConfig(
     level=logging.INFO,
@@ -139,9 +139,9 @@ def visualize_verification(
     # Add labels
     draw = ImageDraw.Draw(combined)
     label_y = 10
-    draw.text((img_w + 10, label_y), "ORIGINAL (Red)", fill="red")
-    draw.text((img_w * 2 + 10, label_y), "VERIFIED (Green)", fill="green")
-    draw.text((img_w * 3 + 10, label_y), "CAUGHT FPs (Orange)", fill="orange")
+    draw.text((10, label_y), "ORIGINAL (Red)", fill="red")
+    draw.text((img_w + 10, label_y), "VERIFIED (Green)", fill="green")
+    draw.text((img_w * 2 + 10, label_y), "CAUGHT FPs (Orange)", fill="orange")
 
     # Save if output path provided
     if output_path:
@@ -291,6 +291,9 @@ def main():
     )
 
     logger.info("=" * 80)
+    if not stats:
+        logger.warning("No statistics returned (image may not have been found).")
+        return
     logger.info(f"Image {stats['image_id']}:")
     logger.info(f"  Original: {stats['original_count']} detections")
     logger.info(f"  Verified: {stats['verified_count']} detections")
