@@ -103,6 +103,7 @@ class VLMDINOFusion(BaseVLM):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        class_name: str | None = None,
     ) -> list:
         """
         Few-shot detection with VLM-generated prompts.
@@ -111,16 +112,6 @@ class VLMDINOFusion(BaseVLM):
         1. Use VLM to analyze support_images
         2. Generate detailed text description
         3. Use Grounding DINO with generated description on query_image
-        
-        Args:
-            query_image: Image to detect objects in
-            support_images: List of support images showing target objects
-            prompt_text: Optional class name or initial prompt (used as fallback)
-            img_width: Query image width
-            img_height: Query image height
-            
-        Returns:
-            List of bounding boxes in COCO format [x, y, width, height]
         """
         scored_predictions = self.predict_few_shot_with_scores(
             query_image,
@@ -128,6 +119,7 @@ class VLMDINOFusion(BaseVLM):
             prompt_text,
             img_width,
             img_height,
+            class_name=class_name,
         )
         return self._extract_bboxes(scored_predictions)
 
@@ -138,16 +130,22 @@ class VLMDINOFusion(BaseVLM):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        class_name: str | None = None,
     ) -> list[dict]:
         """
         Few-shot score-aware API that preserves detector confidences.
+        
+        Args:
+            class_name: Explicit target class (e.g. "car"). Falls back to
+                        extracting from *prompt_text* when not provided.
         """
         if not support_images:
             logger.info("No support images provided, using zero-shot detection")
-            return self.predict_with_scores(query_image, prompt_text, img_width, img_height)
+            target = class_name or self._extract_class_name(prompt_text)
+            return self.predict_with_scores(query_image, target, img_width, img_height)
         
-        # Extract class name from prompt (e.g., "Detect all dogs" → "dogs")
-        class_name = self._extract_class_name(prompt_text)
+        if not class_name:
+            class_name = self._extract_class_name(prompt_text)
         
         logger.info(
             f"VLM-DINO Fusion: analyzing {len(support_images)} support "

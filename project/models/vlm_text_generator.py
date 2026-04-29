@@ -65,18 +65,16 @@ class VLMTextGenerator:
             return self._template_description(class_name)
     
     def _create_description_prompt(self, class_name: str, num_examples: int) -> str:
-        """Create a structured prompt for VLM to analyze support examples."""
+        """Create a prompt that yields a short noun-phrase for Grounding DINO.
+
+        Grounding DINO works best with concise phrases (< 15 words),
+        not paragraph-length descriptions.
+        """
         return (
-            f"You are analyzing {num_examples} visual examples of '{class_name}' objects. "
-            f"Based on these images, generate a detailed and specific text description that would help "
-            f"an object detector identify similar objects. Include:\n"
-            f"1. Visual appearance: shape, distinctive features, colors, textures\n"
-            f"2. Size and proportions relative to surrounding objects\n"
-            f"3. Typical context: where and how this object usually appears\n"
-            f"4. Distinguishing characteristics from similar objects\n"
-            f"5. Key attributes and parts to look for\n"
-            f"Be precise and descriptive. This description will be used as a detection prompt.\n"
-            f"Return ONLY the description, no preamble or numbered list - use natural language."
+            f"You are looking at {num_examples} example image(s) of '{class_name}'. "
+            f"Describe the object in one short phrase (under 15 words) that captures "
+            f"its key visual features — shape, color, texture, and distinguishing details. "
+            f"Output ONLY the phrase, nothing else."
         )
     
     def _generate_qwen_description(
@@ -111,12 +109,11 @@ class VLMTextGenerator:
                 return_tensors="pt"
             ).to(self.vlm_model.device)
             
-            # Generate text
             with torch.no_grad():
                 generated_ids = self.vlm_model.model.generate(
                     **inputs,
-                    max_new_tokens=256,  # Allow longer descriptions
-                    temperature=0.7,
+                    max_new_tokens=50,
+                    temperature=0.3,
                     top_p=0.9,
                 )
             
@@ -157,7 +154,7 @@ class VLMTextGenerator:
                 # or separator between each item
             prompt_parts.append(prompt)
             question = "\n".join(prompt_parts)
-            generation_config = dict(max_new_tokens=256, do_sample=False)
+            generation_config = dict(max_new_tokens=50, do_sample=False)
 
             with torch.no_grad():
                 output_text = self.vlm_model.model.chat(

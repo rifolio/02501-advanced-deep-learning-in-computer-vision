@@ -49,6 +49,7 @@ class BaseVLM(ABC):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        **kwargs,
     ) -> list:
         """
         Few-shot detection entrypoint.
@@ -63,6 +64,7 @@ class BaseVLM(ABC):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        **kwargs,
     ) -> list[dict]:
         """
         Backward-compatible few-shot scored prediction API.
@@ -76,6 +78,7 @@ class BaseVLM(ABC):
             prompt_text,
             img_width,
             img_height,
+            **kwargs,
         )
         return self._build_provisional_scored_predictions(boxes)
 

@@ -189,6 +189,7 @@ class Qwen2_5_VL(BaseVLM):
         prompt_text: str,
         img_width: int,
         img_height: int,
+        **kwargs,
     ) -> list:
         strict_prompt_text = f"{prompt_text.rstrip()}{self._strict_output_tail()}"
         content = [{"type": "image", "image": img} for img in support_images]
