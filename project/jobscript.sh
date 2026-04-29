@@ -1,10 +1,10 @@
 #!/bin/bash
-#BSUB -J VLM_ZeroShot_COCO_qwen
+#BSUB -J VLM_FewShot_InternVL
 #BSUB -q gpua100  # Note: Verify if this should be the 02501 queue instead!
 #BSUB -gpu "num=1:mode=exclusive_process"
 
 # Email notifications (add your email with #BSUB -u your_email@dtu.dk if desired)
-#BSUB -u s253510@student.dtu.dk
+#BSUB -u s254355@student.dtu.dk
 #BSUB -B
 #BSUB -N
 # CPU cores and memory
@@ -35,6 +35,16 @@ module load cuda/12.4
 
 source /zhome/99/f/223556/02501-advanced-deep-learning-in-computer-vision/project/.venv/bin/activate
 
+# Ensure we run from project root and logs exist
+cd /zhome/99/f/223556/02501-advanced-deep-learning-in-computer-vision/project || exit 1
+mkdir -p logs
+
+# Runtime configuration (override stale env defaults here)
+export EXPERIMENT_MODE=few_shot
+export MODEL_NAME=internvl
+export K_SHOT=3
+export PROMPT_STRATEGY=side_by_side
+export EVAL_SPLIT_PATH=data/splits/val_pilot.json
 
 # Print GPU info to verify we got a card with enough VRAM (ideally 16GB+)
 nvidia-smi
@@ -47,7 +57,7 @@ echo "UV version:"
 uv --version
 
 # Run the evaluation pipeline
-echo "Starting VLM Zero-Shot Evaluation..."
+echo "Starting VLM Few-Shot Evaluation..."
 python main.py
 
 # Capture exit code

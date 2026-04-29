@@ -9,7 +9,6 @@ Implements the complete pipeline:
 from __future__ import annotations
 
 import logging
-from PIL import Image
 
 from .base_vlm import BaseVLM
 from .qwen import Qwen2_5_VL
