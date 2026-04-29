@@ -91,13 +91,10 @@ class InternVL(BaseVLM):
         self.model = AutoModel.from_pretrained(
             self.model_id,
             torch_dtype=torch.bfloat16,
-            #load_in_8bit=True,
-            low_cpu_mem_usage=True,
-            use_flash_attn=True, #since we mostly use volta's we keep it false; if we use a100 we can set it to true and compile
-            device_map="auto",           
-            trust_remote_code=True
-        ).eval()# .to(self.device)
-        # REMOVED: .to(self.device) because device_map="auto" and load_in_8bit handle it; otherwise we delete them and add it
+            low_cpu_mem_usage=False,
+            use_flash_attn=False,
+            trust_remote_code=True,
+        ).eval().to(self.device)
         logger.info(
             "Initialized model=%s model_id=%s device=%s",
             self.model_name,
@@ -109,31 +106,33 @@ class InternVL(BaseVLM):
         boxes = []
         parser_fallback_used = False
 
-        # InternVL outputs grounding coordinates in a [0, 1000] normalized range,
-        # typically inside <box>...</box>. Parse those regions first to avoid
-        # accidentally matching unrelated number lists in free-form text.
-        int_pattern = r"\[\s*\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\s*\]"
-        fallback_pattern = (
-            r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
-            r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
-        )
-        matches = []
-        box_payloads = re.findall(r"<box>(.*?)</box>", text, flags=re.DOTALL)
+        # Our prompt explicitly asks for [[x1,y1,x2,y2], ...] Python-list output,
+        # so we parse that first with ast.literal_eval (handles multi-box, flat,
+        # and nested formats robustly).
+        # If the model instead used InternVL's native <box>[...]</box> grounding
+        # format, we fall back to regex extraction.
+        matches = self._parse_boxes_ast(text)
+        used_box_tags = False
 
-        if box_payloads:
-            for payload in box_payloads:
-                matches.extend(re.findall(int_pattern, payload))
-            if not matches:
+        if not matches:
+            matches = self._parse_boxes_regex_quads(text)
+
+        if not matches:
+            box_payloads = re.findall(r"<box>(.*?)</box>", text, flags=re.DOTALL)
+            if box_payloads:
+                int_pattern = r"\[\s*\[?\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\]?\s*\]"
+                float_pattern = (
+                    r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
+                    r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
+                )
                 for payload in box_payloads:
-                    matches.extend(re.findall(fallback_pattern, payload))
-                parser_fallback_used = bool(matches)
-        else:
-            # No <box> tags: use ast.literal_eval on the largest bracket expression
-            # to reliably handle [[x,y,x,y], ...] multi-box and flat [x,y,x,y] outputs.
-            matches = self._parse_boxes_ast(text)
-            parser_fallback_used = bool(matches)
+                    matches.extend(re.findall(int_pattern, payload))
+                if not matches:
+                    for payload in box_payloads:
+                        matches.extend(re.findall(float_pattern, payload))
+                used_box_tags = bool(matches)
 
-        return self._scale_matches_to_boxes(matches, img_width, img_height), parser_fallback_used
+        return self._scale_matches_to_boxes(matches, img_width, img_height), used_box_tags
 
     @staticmethod
     def _parse_boxes_ast(text: str) -> list[tuple]:
@@ -162,6 +161,34 @@ class InternVL(BaseVLM):
             if tuples:
                 return tuples
         return []
+
+    @staticmethod
+    def _parse_boxes_regex_quads(text: str) -> list[tuple]:
+        """
+        Find every [x1, y1, x2, y2] int quad in raw text (handles prose + comma-separated lists
+        where greedy ast.literal_eval on the full reply fails).
+        """
+        pat = re.compile(
+            r"\[\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*,\s*(-?\d+)\s*\]"
+        )
+        out: list[tuple] = []
+        seen: set[tuple] = set()
+        for m in pat.finditer(text):
+            x1, y1, x2, y2 = (int(g) for g in m.groups())
+            # COCO-style normalized quads are in [0, 1000]; drop junk like metadata lists.
+            if not all(0 <= v <= 1000 for v in (x1, y1, x2, y2)):
+                continue
+            if x2 <= x1 or y2 <= y1:
+                continue
+            wn, hn = x2 - x1, y2 - y1
+            if wn * hn < 100:  # ignore tiny unrelated quads (e.g. [1,2,3,4])
+                continue
+            t = (x1, y1, x2, y2)
+            if t in seen:
+                continue
+            seen.add(t)
+            out.append(t)
+        return out
 
     def _scale_matches_to_boxes(
         self, matches: list, img_width: int, img_height: int,
@@ -216,7 +243,7 @@ class InternVL(BaseVLM):
             level,
             (
                 "[inference_debug] model=%s image_count=%s prompt_hash=%s prompt_snippet=%r "
-                "parsed_boxes=%s parser_fallback_used=%s output_snippet=%r"
+                "parsed_boxes=%s used_box_tags(fallback)=%s output_snippet=%r"
             ),
             self.model_name,
             image_count,
@@ -280,7 +307,10 @@ class InternVL(BaseVLM):
     def _run_with_images(self, images: list[Image.Image], question: str, img_width: int, img_height: int) -> list:
         pixel_values, num_patches_list = self._prepare_multi_image_pixels(images)
 
-        generation_config = dict(max_new_tokens=256, do_sample=False)
+        generation_config = dict(
+            max_new_tokens=int(settings.internvl_max_new_tokens),
+            do_sample=False,
+        )
 
         with torch.no_grad():
             output_text = self.model.chat(
@@ -294,9 +324,11 @@ class InternVL(BaseVLM):
 
         parsed_boxes, parser_fallback_used = self._parse_boxes(output_text, img_width, img_height)
         if parser_fallback_used:
+            # "fallback" here means the model used <box>...</box> tags instead of
+            # the plain [[x,y,x,y]] list our prompt requests — uncommon but handled.
             self._bump_runtime_stat("parser_fallback_used")
             logger.info(
-                "[parser_debug] model=%s fallback_parser_used=true parsed_boxes=%s",
+                "[parser_debug] model=%s used_box_tags=true parsed_boxes=%s",
                 self.model_name,
                 len(parsed_boxes),
             )

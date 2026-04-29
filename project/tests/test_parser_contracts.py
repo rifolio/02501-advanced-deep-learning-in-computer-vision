@@ -20,7 +20,8 @@ class ParserContractTests(unittest.TestCase):
     def test_internvl_fallback_accepts_decimal_boxes(self):
         text = "<box>[[100.5, 200.25, 500.75, 700.5]]</box>"
         boxes, parser_fallback_used = self.internvl._parse_boxes(text, img_width=1000, img_height=1000)
-        self.assertTrue(parser_fallback_used)
+        # ast.literal_eval parses inner list; <box> regex path is not required.
+        self.assertFalse(parser_fallback_used)
         self.assertEqual(len(boxes), 1)
         self.assertAlmostEqual(boxes[0][0], 100.5)
         self.assertAlmostEqual(boxes[0][1], 200.25)
@@ -34,7 +35,7 @@ class ParserContractTests(unittest.TestCase):
     def test_internvl_clamps_boxes_to_image_bounds(self):
         text = "<box>[[-100, -50, 1200, 1400]]</box>"
         boxes, parser_fallback_used = self.internvl._parse_boxes(text, img_width=100, img_height=200)
-        self.assertTrue(parser_fallback_used)
+        self.assertFalse(parser_fallback_used)
         self.assertEqual(len(boxes), 1)
         self.assertEqual(boxes[0], [0.0, 0.0, 100.0, 200.0])
 

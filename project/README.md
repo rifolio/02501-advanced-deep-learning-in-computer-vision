@@ -1,5 +1,7 @@
 # 02501 Final Project
 
+**Interactive node, venv, and example commands:** see [`GUIDE.md`](GUIDE.md).
+
 ## UV
 
 Navigate to `./project` and run:
@@ -99,8 +101,8 @@ PROMPT_STRATEGY=side_by_side  # side_by_side | cropped_exemplars | text_from_vis
 # Side-by-side GT vs prediction visualizations are enabled by default
 # (set to false to disable)
 LOG_VIZ_ARTIFACT=true
-VIZ_MAX_IMAGES=50
-VIZ_PREVIEW_COUNT=12
+VIZ_MAX_IMAGES=15
+VIZ_PREVIEW_COUNT=15
 VIZ_TARGET_CATEGORY=car       # optional; leave unset to include all classes
 VIZ_OUTPUT_DIR=viz
 ```

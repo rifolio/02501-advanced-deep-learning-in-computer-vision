@@ -1,6 +1,6 @@
 import os
 import json
-from datasets import load_dataset
+
 """
 COCO FSOD-style split: 20 PASCAL-VOC-overlapping classes as 'novel', remaining 60 as 'base'.
 
@@ -57,6 +57,8 @@ def download_hf_coco_subset(
     Streams the COCO dataset from Hugging Face, extracting exactly the requested
     number of images for specific classes, completely bypassing database requirements.
     """
+    from datasets import load_dataset  # optional; only for HF streaming helper
+
     os.makedirs(export_dir, exist_ok=True)
     
     print("Connecting to Hugging Face and streaming COCO...")

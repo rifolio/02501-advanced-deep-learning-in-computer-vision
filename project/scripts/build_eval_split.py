@@ -71,6 +71,32 @@ def main() -> int:
         help="Set eval_cat_ids in manifest to the 20 novel class ids (for novel-only mAP).",
     )
     parser.add_argument(
+        "--contain-cat-names",
+        default="",
+        help=(
+            "Comma-separated COCO category names (e.g. horse). "
+            "Only images with at least one annotation in these categories are kept."
+        ),
+    )
+    parser.add_argument(
+        "--contain-cat-ids",
+        default="",
+        help="Comma-separated COCO category ids (alternative to --contain-cat-names).",
+    )
+    parser.add_argument(
+        "--eval-cat-names",
+        default="",
+        help=(
+            "Comma-separated COCO names; sets manifest eval_cat_ids for scoring and dataloader "
+            "(e.g. horse-only mAP). Overrides --eval-novel-categories-only if both are set."
+        ),
+    )
+    parser.add_argument(
+        "--eval-cat-ids",
+        default="",
+        help="Comma-separated category ids for eval_cat_ids (alternative to --eval-cat-names).",
+    )
+    parser.add_argument(
         "--description",
         default="",
         help="Optional description string stored in the manifest.",
@@ -84,16 +110,35 @@ def main() -> int:
 
     coco = COCO(str(ann_abs))
     all_img_ids = coco.getImgIds()
+    all_img_set = set(all_img_ids)
+
+    def _parse_int_list(raw: str) -> list[int]:
+        return [int(x.strip()) for x in raw.split(",") if x.strip()]
+
+    contain_ids: list[int] = []
+    if args.contain_cat_ids:
+        contain_ids.extend(_parse_int_list(args.contain_cat_ids))
+    if args.contain_cat_names:
+        for name in [n.strip() for n in args.contain_cat_names.split(",") if n.strip()]:
+            found = coco.getCatIds(catNms=[name])
+            if not found:
+                print(f"Unknown COCO category name: {name!r}", file=sys.stderr)
+                return 1
+            contain_ids.extend(int(x) for x in found)
+    contain_ids = list(dict.fromkeys(contain_ids))
 
     if args.novel_only:
         novel_ids = set(novel_cat_ids_from_coco(coco))
         ann_ids = coco.getAnnIds(catIds=list(novel_ids))
-        img_with_novel = set()
-        for a in coco.loadAnns(ann_ids):
-            img_with_novel.add(a["image_id"])
-        candidates = sorted(img_with_novel)
+        img_with_novel = {a["image_id"] for a in coco.loadAnns(ann_ids)}
+        candidates = sorted(img_with_novel & all_img_set)
     else:
-        candidates = sorted(all_img_ids)
+        candidates = sorted(all_img_set)
+
+    if contain_ids:
+        ann_ids = coco.getAnnIds(catIds=contain_ids)
+        img_with_cat = {a["image_id"] for a in coco.loadAnns(ann_ids)}
+        candidates = sorted(set(candidates) & img_with_cat)
 
     rng = random.Random(args.seed)
     order = list(candidates)
@@ -109,6 +154,17 @@ def main() -> int:
     eval_cat_ids: list[int] | None = None
     if args.eval_novel_categories_only:
         eval_cat_ids = novel_cat_ids_from_coco(coco)
+    if args.eval_cat_ids:
+        eval_cat_ids = _parse_int_list(args.eval_cat_ids)
+    if args.eval_cat_names:
+        eids: list[int] = []
+        for name in [n.strip() for n in args.eval_cat_names.split(",") if n.strip()]:
+            found = coco.getCatIds(catNms=[name])
+            if not found:
+                print(f"Unknown eval category name: {name!r}", file=sys.stderr)
+                return 1
+            eids.extend(int(x) for x in found)
+        eval_cat_ids = list(dict.fromkeys(eids))
 
     manifest = EvalSplitManifest(
         version=1,

@@ -23,7 +23,11 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("API_KEY", "api_key"),
     )
-    device: str = "cuda" if torch.cuda.is_available() else "cpu"
+    # Override with DEVICE=cuda on GPU nodes if auto-detect fails (e.g. wrong module order).
+    device: str = Field(
+        default_factory=lambda: "cuda" if torch.cuda.is_available() else "cpu",
+        validation_alias=AliasChoices("DEVICE", "device"),
+    )
     #log_level: int = logging.INFO
     #####
     log_level: int | str = Field(
@@ -31,11 +35,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("LOG_LEVEL", "log_level"),
     )
     
-    # 2. Add the VLM full text flag as a boolean
+    # Log full prompt + raw model completion in inference_debug (no 120/180 truncation).
+    # Set VLM_LOG_FULL_TEXT=false to restore short snippets (quieter default for large runs).
     vlm_log_full_text: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("VLM_LOG_FULL_TEXT", "vlm_log_full_text"),)
-    ####
+        default=True,
+        validation_alias=AliasChoices("VLM_LOG_FULL_TEXT", "vlm_log_full_text"),
+    )
     experiment_mode: str = Field(
         default="zero_shot",
         validation_alias=AliasChoices("EXPERIMENT_MODE", "experiment_mode"),
@@ -43,6 +48,13 @@ class Settings(BaseSettings):
     model_name: str = Field(
         default="qwen",
         validation_alias=AliasChoices("MODEL_NAME", "model_name"),
+    )
+    # InternVL generation budget. Each box is ~20–50 tokens; 15+ instances needs headroom.
+    # Raise with INTERNVL_MAX_NEW_TOKENS (e.g. 2048) on crowded scenes.
+    internvl_max_new_tokens: int = Field(
+        default=1536,
+        ge=16,
+        validation_alias=AliasChoices("INTERNVL_MAX_NEW_TOKENS", "internvl_max_new_tokens"),
     )
     k_shot: int = Field(
         default=1,
@@ -56,16 +68,29 @@ class Settings(BaseSettings):
         default="side_by_side",
         validation_alias=AliasChoices("PROMPT_STRATEGY", "prompt_strategy"),
     )
+    # few_shot: support exemplars from full COCO val (default) or from HF-exported subset
+    few_shot_support_source: str = Field(
+        default="coco",
+        validation_alias=AliasChoices("FEW_SHOT_SUPPORT_SOURCE", "few_shot_support_source"),
+    )
+    hf_support_ann_file: str = Field(
+        default="data/coco_novel_10_shot/hf_subset_annotations.json",
+        validation_alias=AliasChoices("HF_SUPPORT_ANN_FILE", "hf_support_ann_file"),
+    )
+    hf_support_img_dir: str = Field(
+        default="data/coco_novel_10_shot",
+        validation_alias=AliasChoices("HF_SUPPORT_IMG_DIR", "hf_support_img_dir"),
+    )
     log_viz_artifact: bool = Field(
         default=True,
         validation_alias=AliasChoices("LOG_VIZ_ARTIFACT", "log_viz_artifact"),
     )
     viz_max_images: int = Field(
-        default=50,
+        default=15,
         validation_alias=AliasChoices("VIZ_MAX_IMAGES", "viz_max_images"),
     )
     viz_preview_count: int = Field(
-        default=12,
+        default=15,
         validation_alias=AliasChoices("VIZ_PREVIEW_COUNT", "viz_preview_count"),
     )
     viz_target_category: Optional[str] = Field(
@@ -107,6 +132,17 @@ class Settings(BaseSettings):
 settings = Settings()
 
 logging.basicConfig(level=settings.log_level)
+if settings.device.lower().startswith("cuda") and not torch.cuda.is_available():
+    logger.warning(
+        "DEVICE is %r but torch.cuda.is_available() is False — PyTorch will use CPU. "
+        "On the cluster: request a GPU job, `module load cuda/...`, verify `nvidia-smi`, "
+        "and use a CUDA wheel of PyTorch (not cpu-only).",
+        settings.device,
+    )
+elif settings.device == "cpu" and torch.cuda.is_available():
+    logger.info(
+        "Using DEVICE=cpu while CUDA is available; set DEVICE=cuda for GPU inference."
+    )
 logger.info(f'Using device: {settings.device}')
 logger.info(f"Using dataset: {settings.data_dir}")
 logger.info(

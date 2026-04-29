@@ -6,7 +6,7 @@ from pycocotools.coco import COCO
 
 from config import settings
 from data.eval_split import load_eval_split
-from data.support_sampler import HFSupportSampler
+from data.support_sampler import HFSupportSampler, SupportSetSampler
 from .datasets import COCOFewShotDataset, COCOZeroShotDataset
 
 logger = logging.getLogger(__name__)
@@ -75,15 +75,37 @@ def get_coco_few_shot_dataloader(batch_size=1, num_workers=4, k_shot: int = 1):
         img_infos = coco.loadImgs(list(excluded_ids))
         excluded_filenames = {str(info["file_name"]) for info in img_infos}
 
-    # Wire in the custom HF sampler for novel classes
-    support_sampler = HFSupportSampler(
-        hf_ann_file="data/coco_novel_10_shot/hf_subset_annotations.json",
-        hf_img_dir="data/coco_novel_10_shot",
-        seed=settings.few_shot_seed,
-        excluded_image_ids=excluded_ids,
-        excluded_filenames=excluded_filenames,
-    )
-    if manifest:
+    use_hf = settings.few_shot_support_source.lower() == "hf"
+    hf_ann = Path(settings.hf_support_ann_file)
+    if not hf_ann.is_absolute():
+        hf_ann = Path.cwd() / hf_ann
+    hf_ann = hf_ann.resolve()
+
+    if use_hf and hf_ann.is_file():
+        support_sampler = HFSupportSampler(
+            hf_ann_file=str(settings.hf_support_ann_file),
+            hf_img_dir=str(settings.hf_support_img_dir),
+            seed=settings.few_shot_seed,
+            excluded_image_ids=excluded_ids,
+            excluded_filenames=excluded_filenames,
+        )
+        logger.info("Few-shot support pool: HF subset at %s", hf_ann)
+    else:
+        if use_hf:
+            logger.warning(
+                "FEW_SHOT_SUPPORT_SOURCE=hf but annotations not found at %s; "
+                "using COCO val support pool (same ann_file / img_dir as queries).",
+                hf_ann,
+            )
+        support_sampler = SupportSetSampler(
+            ann_file=settings.ann_file,
+            img_dir=settings.img_dir,
+            excluded_image_ids=excluded_ids,
+            seed=settings.few_shot_seed,
+        )
+        logger.info("Few-shot support pool: COCO val (%s)", settings.ann_file)
+
+    if isinstance(support_sampler, HFSupportSampler) and manifest:
         overlap = support_sampler.audit_exclusion_overlap()
         if overlap["overlapping_image_ids"] or overlap["overlapping_filenames"]:
             logger.warning(

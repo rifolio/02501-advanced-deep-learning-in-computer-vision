@@ -250,11 +250,15 @@ class Experiment:
             draw_gt = ImageDraw.Draw(gt_panel)
             draw_pred = ImageDraw.Draw(pred_panel)
 
-            # Draw GT boxes for target category (if set) or all categories in the image.
-            # pycocotools treats catIds=None as [None] (matches nothing);
-            # an empty list [] means "no category filter" (matches all).
+            # Draw GT boxes only for the categories being evaluated:
+            # 1. VIZ_TARGET_CATEGORY overrides everything (single-category focus).
+            # 2. Fall back to eval_cat_ids from the split manifest (e.g. horse-only split).
+            # 3. Only if neither is set show all categories.
+            # pycocotools: catIds=[] means no filter (all cats); [id, ...] filters.
             if target_cat_id is not None:
                 gt_cat_ids = [target_cat_id]
+            elif hasattr(dataset, "eval_cat_ids") and dataset.eval_cat_ids:
+                gt_cat_ids = list(dataset.eval_cat_ids)
             else:
                 gt_cat_ids = []
             ann_ids = coco.getAnnIds(imgIds=[image_id], catIds=gt_cat_ids, iscrowd=None)

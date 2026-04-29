@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "ann_file": "data/coco/annotations/instances_val2017.json",
+  "image_ids": [
+    45070,
+    381971,
+    439715,
+    331280,
+    227686
+  ],
+  "eval_cat_ids": [
+    19
+  ],
+  "seed": 42,
+  "description": "val debug: horse only, 5 images"
+}
