@@ -1,13 +1,13 @@
 import unittest
 
-from models.internVL import InternVL2_5_8B
+from models.internVL import InternVL
 from models.qwen import Qwen2_5_VL
 
 
 class ParserContractTests(unittest.TestCase):
     def setUp(self) -> None:
         # Bypass heavyweight model initialization; parser methods do not depend on weights.
-        self.internvl = InternVL2_5_8B.__new__(InternVL2_5_8B)
+        self.internvl = InternVL.__new__(InternVL)
         self.qwen = Qwen2_5_VL.__new__(Qwen2_5_VL)
 
     def test_internvl_parses_historical_integer_box_format(self):
@@ -59,6 +59,41 @@ class ParserContractTests(unittest.TestCase):
         self.assertEqual(len(boxes), 1)
         self.assertAlmostEqual(boxes[0][0], 28.5)
         self.assertAlmostEqual(boxes[0][1], 56.25)
+
+    def test_qwen_list_format_applies_normalized_scaling(self):
+        """List-format [[x1,y1,x2,y2]] uses [0,1000] normalized coords, not pixel space."""
+        text = "[[250, 250, 750, 750]]"
+        boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
+        self.assertTrue(parser_fallback_used)
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(boxes[0][0], 160.0)   # 250/1000 * 640
+        self.assertAlmostEqual(boxes[0][1], 120.0)   # 250/1000 * 480
+        self.assertAlmostEqual(boxes[0][2], 320.0)   # (750-250)/1000 * 640
+        self.assertAlmostEqual(boxes[0][3], 240.0)   # (750-250)/1000 * 480
+
+    def test_qwen_native_format_still_uses_ratio_correction(self):
+        """Native <|box_start|> format applies pixel-space ratio correction, not /1000."""
+        text = "<|box_start|>(28, 56), (280, 420)<|box_end|>"
+        boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=280, img_height=420)
+        self.assertFalse(parser_fallback_used)
+        self.assertEqual(len(boxes), 1)
+        self.assertEqual(boxes[0], [28.0, 56.0, 252.0, 364.0])
+
+    def test_qwen_list_format_drops_degenerate_boxes(self):
+        """Degenerate boxes (xmax <= xmin after normalization) should be dropped."""
+        text = "[[500, 500, 500, 800], [100, 100, 400, 400]]"
+        boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
+        self.assertTrue(parser_fallback_used)
+        self.assertEqual(len(boxes), 1)
+        self.assertAlmostEqual(boxes[0][0], 64.0)    # 100/1000 * 640
+        self.assertAlmostEqual(boxes[0][1], 48.0)    # 100/1000 * 480
+
+    def test_qwen_native_format_drops_degenerate_boxes(self):
+        """Native-format degenerate boxes (xmax <= xmin) should be dropped."""
+        text = "<|box_start|>(200, 100), (100, 300)<|box_end|>"
+        boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
+        self.assertFalse(parser_fallback_used)
+        self.assertEqual(boxes, [])
 
 
 if __name__ == "__main__":

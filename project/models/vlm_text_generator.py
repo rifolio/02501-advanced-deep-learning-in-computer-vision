@@ -4,11 +4,10 @@ This enables the VLM-to-text pipeline for Task 3.
 """
 
 from __future__ import annotations
-from models.internVL import InternVL2_5_8B, build_transform, dynamic_preprocess, find_closest_aspect_ratio
 import logging
-from typing import Optional
 from PIL import Image
 import torch
+from qwen_vl_utils import process_vision_info
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +27,7 @@ class VLMTextGenerator:
         Initialize with a VLM model instance.
         
         Args:
-            vlm_model: VLM instance (Qwen2_5_VL or InternVL2_5_8B)
+            vlm_model: VLM instance (Qwen2_5_VL or InternVL)
         """
         self.vlm_model = vlm_model
         self.model_name = vlm_model.model_name
@@ -59,7 +58,7 @@ class VLMTextGenerator:
         # Call VLM to generate description
         if self.model_name == "Qwen2.5-VL-7B":
             return self._generate_qwen_description(support_images, prompt)
-        elif self.model_name == "InternVL2.5-8B":
+        elif self.model_name.startswith("InternVL"):
             return self._generate_internvl_description(support_images, prompt)
         else:
             logger.warning(f"Unknown VLM: {self.model_name}, using template")
@@ -101,8 +100,6 @@ class VLMTextGenerator:
                 add_generation_prompt=True
             )
             
-            # Process images
-            from qwen_vl_utils import process_vision_info
             image_inputs, video_inputs = process_vision_info(messages)
             
             # Prepare inputs
@@ -175,7 +172,6 @@ class VLMTextGenerator:
             
             logger.info(f"InternVL generated description: {output_text[:100]}...")
             return output_text.strip()
-            return self._template_description("object")
             
         except Exception as e:
             logger.error(f"InternVL description generation failed: {e}")
@@ -183,6 +179,11 @@ class VLMTextGenerator:
     
     def _template_description(self, class_name: str) -> str:
         """Fallback template description."""
+        return VLMTextGenerator._template_description_static(class_name)
+
+    @staticmethod
+    def _template_description_static(class_name: str) -> str:
+        """Fallback template description (static, usable without a VLM instance)."""
         return (
             f"A {class_name} with distinctive visual properties. "
             f"Look for typical appearance, characteristic features, and size. "
