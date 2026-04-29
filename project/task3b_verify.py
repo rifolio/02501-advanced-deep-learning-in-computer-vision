@@ -27,23 +27,18 @@ from __future__ import annotations
 
 import json
 import logging
-import sys
 from pathlib import Path
 from collections import defaultdict
-from typing import Optional
 
-import torch
 import wandb
 from tqdm import tqdm
 from pycocotools.cocoeval import COCOeval
 
 from config import settings
 from data.dataloaders import get_coco_few_shot_dataloader
-from data.support_sampler import SupportSetSampler
 from models.qwen import Qwen2_5_VL
-from models.vlm_verifier import VLMVerifier, VerificationResponse
+from models.vlm_verifier import VLMVerifier
 from prompts.verification_strategy import VerificationStrategy
-from pipeline import FewShotExperiment
 
 logging.basicConfig(
     level=logging.INFO,
@@ -180,7 +175,7 @@ class Task3bVerificationExperiment:
 
         logger.info("Starting verification process...")
 
-        for batch_idx, batch in enumerate(tqdm(
+        for batch in tqdm(
             self.dataloader,
             desc="Task 3b: VLM Verification of Detections"
         )):
@@ -396,34 +391,11 @@ def main():
     # Load COCO ground truth
     coco_gt = COCO(settings.ann_file)
 
-    # Get excluded image IDs
-    eval_split_path = settings.resolved_eval_split_path()
-    excluded_ids = set()
-    if eval_split_path:
-        with open(eval_split_path) as f:
-            eval_split = json.load(f)
-            excluded_ids = set(eval_split.get("image_ids", []))
-    else:
-        # Use all COCO val2017 images
-        excluded_ids = set(coco_gt.getImgIds())
-
-    # Initialize support sampler
-    support_sampler = SupportSetSampler(
-        ann_file=settings.ann_file,
-        img_dir=settings.img_dir,
-        excluded_image_ids=excluded_ids,
-        seed=settings.few_shot_seed,
-    )
-
-    # Get dataloader
+    # Get dataloader (uses settings for ann_file, img_dir, eval_split_path)
     test_loader = get_coco_few_shot_dataloader(
-        ann_file=settings.ann_file,
-        img_dir=settings.img_dir,
-        support_sampler=support_sampler,
         k_shot=args.k_shot,
         batch_size=1,
         num_workers=0,
-        eval_split_path=eval_split_path,
     )
 
     # Initialize VLM verifier
