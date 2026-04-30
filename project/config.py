@@ -49,6 +49,10 @@ class Settings(BaseSettings):
         default="qwen",
         validation_alias=AliasChoices("MODEL_NAME", "model_name"),
     )
+    internvl_model_id: str = Field(
+        default="OpenGVLab/InternVL2_5-1B",
+        validation_alias=AliasChoices("INTERNVL_MODEL_ID", "internvl_model_id"),
+    )
     # InternVL generation budget. Each box is ~20–50 tokens; 15+ instances needs headroom.
     # Raise with INTERNVL_MAX_NEW_TOKENS (e.g. 2048) on crowded scenes.
     internvl_max_new_tokens: int = Field(
@@ -101,6 +105,11 @@ class Settings(BaseSettings):
         default="viz",
         validation_alias=AliasChoices("VIZ_OUTPUT_DIR", "viz_output_dir"),
     )
+    # Per-query logits/threshold logs for Grounding DINO (very verbose on full eval).
+    grounding_dino_debug: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("GROUNDING_DINO_DEBUG", "grounding_dino_debug"),
+    )
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", env_ignore_empty=True)
 
@@ -148,7 +157,7 @@ logger.info(f"Using dataset: {settings.data_dir}")
 logger.info(
     (
         "Runtime selection: model_name=%s experiment_mode=%s k_shot=%s prompt_strategy=%s "
-        "log_viz_artifact=%s viz_max_images=%s viz_target_category=%s"
+        "log_viz_artifact=%s viz_max_images=%s viz_target_category=%s grounding_dino_debug=%s"
     ),
     settings.model_name,
     settings.experiment_mode,
@@ -157,6 +166,7 @@ logger.info(
     settings.log_viz_artifact,
     settings.viz_max_images,
     settings.viz_target_category,
+    settings.grounding_dino_debug,
 )
 if settings.eval_split_path:
     logger.info("Runtime selection: eval_split_path=%s", settings.eval_split_path)

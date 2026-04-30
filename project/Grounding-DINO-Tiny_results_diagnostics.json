@@ -1,0 +1,8 @@
+{
+  "num_items_total": 50,
+  "num_items_skipped_no_targets": 0,
+  "num_class_queries": 50,
+  "num_queries_zero_boxes": 0,
+  "num_predictions_written": 100,
+  "parser_fallback_used": 0
+}

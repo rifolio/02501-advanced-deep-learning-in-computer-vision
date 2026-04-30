@@ -9,6 +9,7 @@ from PIL import Image
 from torchvision.transforms.functional import InterpolationMode
 from transformers import AutoTokenizer, AutoModel
 from config import settings
+from prompts.zero_shot_vlm import zero_shot_detection_instructions
 from .base_vlm import BaseVLM
 
 logger = logging.getLogger(__name__)
@@ -259,11 +260,10 @@ class InternVL(BaseVLM):
             {
                 "image": image,
                 "text": (
-                    "Please provide the bounding box coordinates of the region this sentence "
-                    f"describes: Detect all the instances of the following object: {target_class}.\n"
-                    "Return ONLY a Python-style list in this exact format: [[x1, y1, x2, y2], ...]\n"
-                    "Coordinates must be integers in [0, 1000].\n"
-                    "Use [x1, y1, x2, y2] with x1 < x2 and y1 < y2.\n"
+                    f"{zero_shot_detection_instructions(target_class)}"
+                    "Return ONLY a Python-style list in this exact format: "
+                    "[[x1, y1, x2, y2], ...]\n"
+                    "Coordinates must be integers in [0, 1000]; use x1 < x2 and y1 < y2.\n"
                     "Do not return words, labels, markdown, or explanations.\n"
                     "If no instance is present, return [] exactly."
                 ),
@@ -323,6 +323,24 @@ class InternVL(BaseVLM):
             )
 
         parsed_boxes, parser_fallback_used = self._parse_boxes(output_text, img_width, img_height)
+        if parsed_boxes:
+            iw, ih = max(1, int(img_width)), max(1, int(img_height))
+            for bx in parsed_boxes:
+                x, y, bw, bh = bx[0], bx[1], bx[2], bx[3]
+                frac = float(bw * bh) / float(iw * ih)
+                if frac >= 0.85:
+                    logger.warning(
+                        "[large_bbox_alert] model=%s image=%sx%s frac_of_image=%.4f coco_xywh=%s "
+                        "parser_fallback_used=%s output_tail=%r",
+                        self.model_name,
+                        img_width,
+                        img_height,
+                        frac,
+                        bx,
+                        parser_fallback_used,
+                        output_text.strip()[-600:],
+                    )
+                    break
         if parser_fallback_used:
             # "fallback" here means the model used <box>...</box> tags instead of
             # the plain [[x,y,x,y]] list our prompt requests — uncommon but handled.
@@ -374,18 +392,15 @@ class InternVL(BaseVLM):
             "Do not return words, labels, markdown, or explanations.\n"
             "If no instance is present, return [] exactly."
         )
-        strict_prompt_text = f"{prompt_text.rstrip()}{strict_output_tail}"
         structured_inputs = [
             {
                 "image": support_image,
-                "text": (
-                    f"Support example {idx}: use this as visual grounding context for the task below.\n"
-                    f"{prompt_text.rstrip()}"
-                ),
+                "text": f"Support example {idx}: reference image showing the target class.",
             }
             for idx, support_image in enumerate(support_images, start=1)
         ]
-        structured_inputs.append({"image": query_image, "text": strict_prompt_text})
+        query_text = f"{prompt_text.rstrip()}{strict_output_tail}"
+        structured_inputs.append({"image": query_image, "text": query_text})
         return self._run_structured_inputs(structured_inputs, img_width, img_height)
 
 

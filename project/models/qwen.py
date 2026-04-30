@@ -4,6 +4,7 @@ import hashlib
 import torch
 from transformers import Qwen2_5_VLForConditionalGeneration, AutoProcessor
 from qwen_vl_utils import process_vision_info
+from prompts.zero_shot_vlm import zero_shot_detection_instructions
 from .base_vlm import BaseVLM
 
 logger = logging.getLogger(__name__)
@@ -173,8 +174,8 @@ class Qwen2_5_VL(BaseVLM):
 
     def predict(self, image, target_class: str, img_width: int, img_height: int) -> list:
         prompt_text = (
-            f"Detect all {target_class} in this image."
-            f"{self._strict_output_tail()}"
+            zero_shot_detection_instructions(target_class).rstrip()
+            + self._strict_output_tail()
         )
         content = [
             {"type": "image", "image": image},

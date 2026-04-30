@@ -17,7 +17,7 @@ def _get_model():
     if model_name == "qwen":
         return Qwen2_5_VL(device=settings.device)
     if model_name == "internvl":
-        return InternVL(device=settings.device)
+        return InternVL(device=settings.device, model_id=settings.internvl_model_id)
     if model_name == "grounding_dino":
         return GroundingDINO(device=settings.device)    
     if model_name == "vlm_dino_fusion":

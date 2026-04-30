@@ -1,49 +1,131 @@
+import logging
+
 import torch
 from PIL import Image
 from transformers import AutoProcessor, AutoModelForZeroShotObjectDetection
 
-# Assuming base_vlm.py is in the same directory. Adjust import if needed.
-from .base_vlm import BaseVLM 
+from config import settings
+
+from .base_vlm import BaseVLM
+
+logger = logging.getLogger(__name__)
+
+# Match Hugging Face `GroundingDinoProcessor.post_process_grounded_object_detection` defaults
+# (see transformers.models.grounding_dino.processing_grounding_dino). Tiny benefits from not
+# using the stricter 0.4/0.3 demo values on every COCO image.
+_DEFAULT_BOX_THRESHOLD = 0.25
+_DEFAULT_TEXT_THRESHOLD = 0.25
+
+
+def _format_grounding_prompt(target_class: str) -> str:
+    """HF-style short noun phrases: lowercased, article prefix, dot-terminated."""
+    phrase = target_class.strip().lower()
+    if not phrase:
+        logger.warning("[grounding_dino] empty target_class; using fallback phrase 'object'")
+        phrase = "object"
+    if not (phrase.startswith("a ") or phrase.startswith("an ")):
+        article = "an " if phrase[:1] in "aeiou" else "a "
+        phrase = f"{article}{phrase}"
+    if not phrase.endswith("."):
+        phrase += "."
+    return phrase
+
 
 class GroundingDINO(BaseVLM):
     def __init__(self, device: str):
         super().__init__(device)
         self.model_name = "Grounding-DINO-Tiny"
         self.model_id = "IDEA-Research/grounding-dino-tiny"
-        
-        # Initialize processor and model
+
         self.processor = AutoProcessor.from_pretrained(self.model_id)
         self.model = AutoModelForZeroShotObjectDetection.from_pretrained(self.model_id).to(self.device)
 
+        self._box_threshold = _DEFAULT_BOX_THRESHOLD
+        self._text_threshold = _DEFAULT_TEXT_THRESHOLD
+
     def _run_detection(self, image, target_class: str, img_width: int, img_height: int):
-        # 1. Image Preprocessing
         if isinstance(image, str):
-            image = Image.open(image).convert('RGB')
-        elif getattr(image, 'mode', None) != 'RGB':
-            image = image.convert('RGB')
+            image = Image.open(image).convert("RGB")
+        elif getattr(image, "mode", None) != "RGB":
+            image = image.convert("RGB")
 
-        # 2. Text Formatting — processor expects a single string (or List[str] for batch).
-        # Ensure the prompt ends with a period; Grounding DINO uses "." as a phrase separator.
-        text_prompt = target_class.strip()
-        if not text_prompt.endswith("."):
-            text_prompt += "."
+        text_prompt = _format_grounding_prompt(target_class)
 
-        # 3. Model Inference
+        pil_w, pil_h = image.size
+        if (pil_w, pil_h) != (img_width, img_height):
+            logger.warning(
+                (
+                    "[grounding_dino] PIL size (w,h)=(%s,%s) != dataset (w,h)=(%s,%s); "
+                    "boxes are rescaled with dataset dimensions — check annotations vs files."
+                ),
+                pil_w,
+                pil_h,
+                img_width,
+                img_height,
+            )
+
         inputs = self.processor(images=image, text=text_prompt, return_tensors="pt").to(self.device)
-        
+
         with torch.no_grad():
             outputs = self.model(**inputs)
 
-        # 4. Post-Processing
-        # target_sizes expects (height, width)
+        logits = outputs.logits
+        probs = torch.sigmoid(logits)
+        max_per_query, _ = probs.max(dim=-1)
+        global_max = float(max_per_query.max().item())
+        num_queries_above = int((max_per_query > self._box_threshold).sum().item())
+        # Full (query × vocab) logits can contain non-finite entries while per-query max scores stay finite.
+        logits_nonfinite_n = int((~torch.isfinite(logits)).sum().item())
+        query_scores_finite = bool(torch.isfinite(max_per_query).all().item())
+
         results = self.processor.post_process_grounded_object_detection(
             outputs,
             inputs.input_ids,
-            threshold=0.4,  # Note: HF updated 'threshold' to 'box_threshold' in recent versions
-            text_threshold=0.3,
-            target_sizes=[(img_height, img_width)] 
+            threshold=self._box_threshold,
+            text_threshold=self._text_threshold,
+            target_sizes=[(img_height, img_width)],
         )
-        return results[0]
+        result = results[0]
+        n_boxes = len(result["boxes"])
+
+        if settings.grounding_dino_debug:
+            logger.info(
+                (
+                    "[grounding_dino] class_name=%r prompt=%r max_sigmoid=%.4f "
+                    "queries_above_box_thr=%d/%d box_threshold=%.2f text_threshold=%.2f "
+                    "postprocess_boxes=%d logits_nonfinite_n=%d query_scores_finite=%s"
+                ),
+                target_class,
+                text_prompt,
+                global_max,
+                num_queries_above,
+                max_per_query.numel(),
+                self._box_threshold,
+                self._text_threshold,
+                n_boxes,
+                logits_nonfinite_n,
+                query_scores_finite,
+            )
+        elif logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                (
+                    "[grounding_dino] class_name=%r prompt=%r max_sigmoid=%.4f "
+                    "queries_above_box_thr=%d/%d box_threshold=%.2f text_threshold=%.2f "
+                    "postprocess_boxes=%d logits_nonfinite_n=%d query_scores_finite=%s"
+                ),
+                target_class,
+                text_prompt,
+                global_max,
+                num_queries_above,
+                max_per_query.numel(),
+                self._box_threshold,
+                self._text_threshold,
+                n_boxes,
+                logits_nonfinite_n,
+                query_scores_finite,
+            )
+
+        return result
 
     def predict_with_scores(
         self,

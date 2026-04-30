@@ -14,7 +14,7 @@ from prompts import get_prompt_strategy
 logger = logging.getLogger(__name__)
 
 class Experiment:
-    def __init__(self, project_name: str, config: dict):
+    def __init__(self, project_name: str, config: dict, wandb_run_name: str | None = None):
         self.project_name = project_name
         self.config = config
         self.dataloader = config["test_loader"]
@@ -38,9 +38,10 @@ class Experiment:
                 man.eval_cat_ids if man.eval_cat_ids is not None else "all_80"
             )
 
+        run_name = wandb_run_name or f"{self.model.model_name}_ZeroShot"
         wandb.init(
             project=self.project_name,
-            name=f"{self.model.model_name}_ZeroShot",
+            name=run_name,
             config=wandb_cfg,
         )
 
@@ -321,7 +322,6 @@ class Experiment:
 
 class FewShotExperiment(Experiment):
     def __init__(self, project_name: str, config: dict):
-        super().__init__(project_name, config)
         self.k_shot = settings.k_shot
         self.prompt_strategy_name = settings.prompt_strategy
         if self.prompt_strategy_name.lower() == "verification":
@@ -330,8 +330,8 @@ class FewShotExperiment(Experiment):
                 "detection few-shot pipeline. Run the dedicated verification pipeline instead."
             )
         self.prompt_strategy = get_prompt_strategy(self.prompt_strategy_name)
-        if wandb.run is not None:
-            wandb.run.name = f"{self.model.model_name}_FewShot_{self.prompt_strategy_name}_{self.k_shot}shot"
+        run_name = f"{config['model'].model_name}_FewShot_{self.prompt_strategy_name}_{self.k_shot}shot"
+        super().__init__(project_name, config, wandb_run_name=run_name)
         wandb.config.update(
             {
                 "k_shot": self.k_shot,

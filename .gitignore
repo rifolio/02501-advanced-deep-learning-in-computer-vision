@@ -2,6 +2,7 @@
 **/*.md
 !**/README.md
 !**/ROADMAP.md
+!**/GUIDE.md
 
 # Python / tooling caches
 **/__pycache__/
