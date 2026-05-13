@@ -51,6 +51,10 @@ class Settings(BaseSettings):
     )
     # InternVL generation budget. Each box is ~20–50 tokens; 15+ instances needs headroom.
     # Raise with INTERNVL_MAX_NEW_TOKENS (e.g. 2048) on crowded scenes.
+    internvl_model_id: str = Field(
+        default="OpenGVLab/InternVL2_5-1B",
+        validation_alias=AliasChoices("INTERNVL_MODEL_ID", "internvl_model_id"),
+    )
     internvl_max_new_tokens: int = Field(
         default=1536,
         ge=16,
