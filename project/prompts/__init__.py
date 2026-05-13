@@ -1,5 +1,6 @@
 from .base_strategy import PromptStrategy
 from .cropped_exemplars import CroppedExemplarsStrategy
+from .oracle_shot import OracleShotStrategy
 from .set_of_mark import SetOfMarkStrategy
 from .side_by_side import SideBySideStrategy
 from .text_from_vision import TextFromVisionStrategy
@@ -15,6 +16,7 @@ def get_prompt_strategy(name: str) -> PromptStrategy:
         "set_of_mark": SetOfMarkStrategy,
         "vlm_text_generation": VLMTextGenerationStrategy,
         "verification": VerificationStrategy,
+        "oracle_shot": OracleShotStrategy,
     }
     if name not in strategy_map:
         valid = ", ".join(sorted(strategy_map))

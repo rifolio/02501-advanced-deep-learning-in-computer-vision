@@ -7,7 +7,7 @@ from pycocotools.coco import COCO
 from config import settings
 from data.eval_split import load_eval_split
 from data.support_sampler import HFSupportSampler, SupportSetSampler
-from .datasets import COCOFewShotDataset, COCOZeroShotDataset
+from .datasets import COCOFewShotDataset, COCOOracleShotDataset, COCOZeroShotDataset
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +120,28 @@ def get_coco_few_shot_dataloader(batch_size=1, num_workers=4, k_shot: int = 1):
         img_dir=settings.img_dir,
         support_sampler=support_sampler,
         k_shot=k_shot,
+        image_ids=image_ids,
+        eval_cat_ids=eval_cat_ids,
+        manifest=manifest,
+    )
+
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        collate_fn=vlm_collate_fn,
+    )
+
+
+def get_coco_oracle_shot_dataloader(batch_size=1, num_workers=4):
+    manifest = _load_manifest_for_dataset()
+    image_ids = manifest.image_ids if manifest else None
+    eval_cat_ids = set(manifest.eval_cat_ids) if manifest and manifest.eval_cat_ids else None
+
+    dataset = COCOOracleShotDataset(
+        ann_file=settings.ann_file,
+        img_dir=settings.img_dir,
         image_ids=image_ids,
         eval_cat_ids=eval_cat_ids,
         manifest=manifest,

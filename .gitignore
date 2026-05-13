@@ -13,8 +13,14 @@
 .ipynb_checkpoints/
 /data/
 
+<<<<<<< Updated upstream
 
 .venv/
 venv/
 
 viz/
+=======
+# Virtual environments (never commit)
+.venv/
+venv/
+>>>>>>> Stashed changes

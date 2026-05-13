@@ -1,5 +1,5 @@
 from config import settings
-from data.dataloaders import get_coco_dataloader, get_coco_few_shot_dataloader
+from data.dataloaders import get_coco_dataloader, get_coco_few_shot_dataloader, get_coco_oracle_shot_dataloader
 from models.qwen import Qwen2_5_VL
 from models.internVL import InternVL
 from models.grounding_dino import GroundingDINO
@@ -26,34 +26,50 @@ def _get_model():
 
 
 def _validate_runtime_configuration() -> None:
-    is_few_shot = settings.experiment_mode.lower() == "few_shot"
+    mode = settings.experiment_mode.lower()
     prompt_strategy = settings.prompt_strategy.lower()
-    if is_few_shot and prompt_strategy == "verification":
+    if mode == "few_shot" and prompt_strategy == "verification":
         raise ValueError(
             "Invalid configuration: prompt_strategy='verification' is not supported in the bbox "
             "detection few-shot pipeline. Use a detection strategy "
             "('side_by_side', 'cropped_exemplars', 'text_from_vision', 'set_of_mark', "
             "'vlm_text_generation') or run the dedicated verification pipeline."
         )
+    if mode == "oracle_shot" and prompt_strategy != "oracle_shot":
+        raise ValueError(
+            f"experiment_mode='oracle_shot' requires prompt_strategy='oracle_shot', got '{prompt_strategy}'."
+        )
 
 
 def main():
     _validate_runtime_configuration()
-    is_few_shot = settings.experiment_mode.lower() == "few_shot"
-    project_name = "VLM_FewShot_Detection" if is_few_shot else "VLM_ZeroShot_Detection"
+    mode = settings.experiment_mode.lower()
+    is_few_shot = mode == "few_shot"
+    is_oracle = mode == "oracle_shot"
+
+    if is_oracle:
+        project_name = "VLM_OracleShot_Detection"
+    elif is_few_shot:
+        project_name = "VLM_FewShot_Detection"
+    else:
+        project_name = "VLM_ZeroShot_Detection"
+
     dataset = settings.data_dir.split("/")[-1]
 
+    if is_oracle:
+        test_loader = get_coco_oracle_shot_dataloader()
+    elif is_few_shot:
+        test_loader = get_coco_few_shot_dataloader(k_shot=settings.k_shot)
+    else:
+        test_loader = get_coco_dataloader()
+
     experiment_config = {
-        "test_loader": (
-            get_coco_few_shot_dataloader(k_shot=settings.k_shot)
-            if is_few_shot
-            else get_coco_dataloader()
-        ),
+        "test_loader": test_loader,
         "model": _get_model(),
         "dataset": dataset,
     }
 
-    experiment_cls = FewShotExperiment if is_few_shot else Experiment
+    experiment_cls = FewShotExperiment if (is_few_shot or is_oracle) else Experiment
     experiment = experiment_cls(project_name=project_name, config=experiment_config)
     experiment.run_evaluation()
 

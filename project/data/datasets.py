@@ -5,7 +5,7 @@ from torch.utils.data import Dataset
 from pycocotools.coco import COCO
 
 from data.eval_split import EvalSplitManifest
-from data.support_sampler import SupportSetSampler
+from data.support_sampler import SupportExample, SupportSetSampler
 
 
 class COCOZeroShotDataset(Dataset):
@@ -146,3 +146,28 @@ class COCOFewShotDataset(Dataset):
             "query_targets": query_targets,
             "support_by_cat": support_by_cat,
         }
+
+
+class COCOOracleShotDataset(COCOZeroShotDataset):
+    def __getitem__(self, idx):
+        item = super().__getitem__(idx)
+        img_id = item["image_id"]
+        image = item["image"]
+
+        support_by_cat: dict[int, list[SupportExample]] = {}
+        for cat_id in self.query_cat_ids:
+            ann_ids = self.coco.getAnnIds(imgIds=[img_id], catIds=[cat_id])
+            anns = self.coco.loadAnns(ann_ids)
+            boxes = [ann["bbox"] for ann in anns]
+            support_by_cat[cat_id] = [
+                SupportExample(
+                    image_id=img_id,
+                    image=image,
+                    boxes=boxes,
+                    category_id=cat_id,
+                    class_name=self.cat_id_to_name.get(cat_id),
+                )
+            ]
+
+        item["support_by_cat"] = support_by_cat
+        return item
