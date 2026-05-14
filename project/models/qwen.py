@@ -101,7 +101,7 @@ class Qwen2_5_VL(BaseVLM):
         prompt_hash = hashlib.sha1(prompt_text.encode("utf-8")).hexdigest()[:12]
         prompt_snippet = prompt_text.strip().replace("\n", " ")[:120]
         output_snippet = output_text.strip().replace("\n", " ")[:180]
-        level = logging.INFO if parsed_box_count == 0 else logging.DEBUG
+        level = logging.DEBUG
         logger.log(
             level,
             (

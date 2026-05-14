@@ -238,7 +238,7 @@ class InternVL(BaseVLM):
         prompt_snippet = prompt_clean if full_text else prompt_clean[:120]
         output_snippet = output_clean if full_text else output_clean[:180]
         ######
-        level = logging.INFO if parsed_box_count == 0 else logging.DEBUG
+        level = logging.DEBUG
         logger.log(
             level,
             (

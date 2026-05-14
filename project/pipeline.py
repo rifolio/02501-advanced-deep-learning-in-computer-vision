@@ -65,6 +65,8 @@ class Experiment:
                 img_w, img_h = item["width"], item["height"]
 
                 query_targets = item.get("query_targets", [])
+                img_classes_with_boxes = 0
+                img_predictions = 0
                 for target in query_targets:
                     cat_id = target["category_id"]
                     class_name = target["class_name"]
@@ -73,7 +75,7 @@ class Experiment:
                     counters["parser_fallback_used"] += self._consume_runtime_stat("parser_fallback_used")
                     if not scored_predictions:
                         counters["num_queries_zero_boxes"] += 1
-                        logger.info(
+                        logger.debug(
                             (
                                 "[query_debug] model=%s mode=zero_shot image_id=%s category_id=%s "
                                 "class_name=%r num_predictions=0"
@@ -93,6 +95,17 @@ class Experiment:
                             }
                         )
                         counters["num_predictions_written"] += 1
+                        img_predictions += 1
+                    if scored_predictions:
+                        img_classes_with_boxes += 1
+                logger.info(
+                    "[image_summary] model=%s mode=zero_shot image_id=%s queried=%s with_boxes=%s predictions=%s",
+                    self.model.model_name,
+                    image_id,
+                    len(query_targets),
+                    img_classes_with_boxes,
+                    img_predictions,
+                )
 
         # Save and Evaluate
         result_file = f"{self.model.model_name}_results.json"
@@ -366,6 +379,8 @@ class FewShotExperiment(Experiment):
                 support_by_cat = item.get("support_by_cat", {})
 
                 query_targets = item.get("query_targets", [])
+                img_classes_with_boxes = 0
+                img_predictions = 0
                 for target in query_targets:
                     cat_id = target["category_id"]
                     class_name = target["class_name"]
@@ -379,7 +394,7 @@ class FewShotExperiment(Experiment):
                     support_images = prompt_bundle["images"][:-1]
                     prompt_text = prompt_bundle["text"]
                     query_for_model = prompt_bundle["images"][-1]
-                    logger.info(
+                    logger.debug(
                         (
                             "[few_shot_input_debug] model=%s prompt_strategy=%s image_id=%s "
                             "category_id=%s class_name=%r support_images=%s"
@@ -391,9 +406,6 @@ class FewShotExperiment(Experiment):
                         class_name,
                         len(support_images),
                     )
-                    #auxiliary VRAM checking
-                    #vram_used = torch.cuda.memory_allocated() / (1024**3)
-                    #logger.info(f"VRAM before predicting {class_name}: {vram_used:.2f} GB")
                     try:
                         scored_predictions = self.model.predict_few_shot_with_scores(
                             query_for_model,
@@ -417,7 +429,7 @@ class FewShotExperiment(Experiment):
                     counters["parser_fallback_used"] += self._consume_runtime_stat("parser_fallback_used")
                     if not scored_predictions:
                         counters["num_queries_zero_boxes"] += 1
-                        logger.info(
+                        logger.debug(
                             (
                                 "[query_debug] model=%s mode=few_shot image_id=%s category_id=%s "
                                 "class_name=%r support_images=%s num_predictions=0"
@@ -439,6 +451,17 @@ class FewShotExperiment(Experiment):
                             }
                         )
                         counters["num_predictions_written"] += 1
+                        img_predictions += 1
+                    if scored_predictions:
+                        img_classes_with_boxes += 1
+                logger.info(
+                    "[image_summary] model=%s mode=few_shot image_id=%s queried=%s with_boxes=%s predictions=%s",
+                    self.model.model_name,
+                    image_id,
+                    len(query_targets),
+                    img_classes_with_boxes,
+                    img_predictions,
+                )
 
         result_file = f"{self.model.model_name}_few_shot_results.json"
         with open(result_file, "w") as f:
