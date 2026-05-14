@@ -1,4 +1,5 @@
 import re
+import ast
 import logging
 import hashlib
 import torch
@@ -42,14 +43,9 @@ class Qwen2_5_VL(BaseVLM):
                 parser_fallback_used = True
 
         if not matches:
-            # --- Pattern 3: list [[x1,y1,x2,y2], ...] -- coords are [0,1000]-normalized ---
-            list_pattern = (
-                r"\[\s*\[?\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*"
-                r"(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]?\s*\]"
-            )
-            matches = re.findall(list_pattern, text)
+            matches = self._parse_absolute_quads(text)
             if matches:
-                matched_format = "list_normalized"
+                matched_format = "list_absolute"
                 parser_fallback_used = True
 
         if matched_format in ("native", "fallback_native"):
@@ -69,20 +65,66 @@ class Qwen2_5_VL(BaseVLM):
                     continue
                 boxes.append([abs_xmin, abs_ymin, abs_xmax - abs_xmin, abs_ymax - abs_ymin])
         else:
-            # list_normalized: coords are in [0, 1000] normalized space.
+            # Qwen2.5-VL grounding outputs absolute coordinates on the image scale.
             x_bound = max(0.0, float(img_width))
             y_bound = max(0.0, float(img_height))
             for match in matches:
                 xmin, ymin, xmax, ymax = map(float, match)
-                abs_xmin = max(0.0, min((xmin / 1000.0) * img_width, x_bound))
-                abs_ymin = max(0.0, min((ymin / 1000.0) * img_height, y_bound))
-                abs_xmax = max(0.0, min((xmax / 1000.0) * img_width, x_bound))
-                abs_ymax = max(0.0, min((ymax / 1000.0) * img_height, y_bound))
+                abs_xmin = max(0.0, min(xmin, x_bound))
+                abs_ymin = max(0.0, min(ymin, y_bound))
+                abs_xmax = max(0.0, min(xmax, x_bound))
+                abs_ymax = max(0.0, min(ymax, y_bound))
                 if abs_xmax <= abs_xmin or abs_ymax <= abs_ymin:
                     continue
                 boxes.append([abs_xmin, abs_ymin, abs_xmax - abs_xmin, abs_ymax - abs_ymin])
 
         return boxes, parser_fallback_used
+
+    @staticmethod
+    def _parse_absolute_quads(text: str) -> list[tuple[float, float, float, float]]:
+        """
+        Extract [x1, y1, x2, y2] quads from list-style or JSON grounding replies.
+        """
+        candidates = []
+        for match in re.finditer(r"\[[\s\S]*\]", text):
+            candidates.append(match.group(0))
+        candidates.sort(key=len, reverse=True)
+
+        for candidate in candidates:
+            try:
+                parsed = ast.literal_eval(candidate)
+            except (ValueError, SyntaxError):
+                continue
+
+            quads: list[tuple[float, float, float, float]] = []
+            seen: set[tuple[float, float, float, float]] = set()
+            self_ref_stack = [parsed]
+            while self_ref_stack:
+                item = self_ref_stack.pop()
+                if isinstance(item, dict):
+                    bbox = item.get("bbox_2d")
+                    if isinstance(bbox, (list, tuple)) and len(bbox) == 4:
+                        quad = tuple(float(v) for v in bbox)
+                        if quad not in seen:
+                            seen.add(quad)
+                            quads.append(quad)
+                    self_ref_stack.extend(item.values())
+                    continue
+                if isinstance(item, (list, tuple)):
+                    if len(item) == 4 and all(isinstance(v, (int, float)) for v in item):
+                        quad = tuple(float(v) for v in item)
+                        if quad not in seen:
+                            seen.add(quad)
+                            quads.append(quad)
+                    else:
+                        self_ref_stack.extend(item)
+            if quads:
+                return quads
+
+        quad_pattern = re.compile(
+            r"\[\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*\]"
+        )
+        return [tuple(map(float, match)) for match in quad_pattern.findall(text)]
 
     def _provisional_score_policy(self) -> str:
         """
@@ -122,11 +164,28 @@ class Qwen2_5_VL(BaseVLM):
         return (
             "\nOutput requirements:\n"
             "Return ONLY a JSON array of boxes in this exact format: [[x1,y1,x2,y2], ...]\n"
-            "Coordinates must be integers in [0,1000].\n"
+            "Coordinates must be absolute image pixels, using the original image size.\n"
             "Use x1 < x2 and y1 < y2.\n"
             "Do not return words, labels, markdown, or explanations.\n"
             "If no instance is present, return [] exactly."
         )
+
+    @classmethod
+    def _rewrite_prompt_for_absolute_coords(cls, prompt_text: str) -> str:
+        text = prompt_text.rstrip()
+        text = re.sub(
+            r"coordinates normalized to \[0\s*,\s*1000\]",
+            "coordinates in absolute image pixels",
+            text,
+            flags=re.IGNORECASE,
+        )
+        text = re.sub(
+            r"Coordinates must be integers in \[0\s*,\s*1000\]\.?",
+            "Coordinates must be absolute image pixels in the original image.",
+            text,
+            flags=re.IGNORECASE,
+        )
+        return text
 
     def _run_messages(self, content: list, img_width: int, img_height: int) -> list:
         messages = [
@@ -191,7 +250,8 @@ class Qwen2_5_VL(BaseVLM):
         img_height: int,
         **kwargs,
     ) -> list:
-        strict_prompt_text = f"{prompt_text.rstrip()}{self._strict_output_tail()}"
+        base_prompt_text = self._rewrite_prompt_for_absolute_coords(prompt_text)
+        strict_prompt_text = f"{base_prompt_text}{self._strict_output_tail()}"
         content = [{"type": "image", "image": img} for img in support_images]
         content.append({"type": "image", "image": query_image})
         content.append({"type": "text", "text": strict_prompt_text})

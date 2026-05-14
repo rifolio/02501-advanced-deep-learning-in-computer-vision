@@ -61,16 +61,13 @@ class ParserContractTests(unittest.TestCase):
         self.assertAlmostEqual(boxes[0][0], 28.5)
         self.assertAlmostEqual(boxes[0][1], 56.25)
 
-    def test_qwen_list_format_applies_normalized_scaling(self):
-        """List-format [[x1,y1,x2,y2]] uses [0,1000] normalized coords, not pixel space."""
-        text = "[[250, 250, 750, 750]]"
+    def test_qwen_list_format_uses_absolute_pixel_coordinates(self):
+        """Qwen2.5-VL list-format boxes should be read as absolute image pixels."""
+        text = "[[25, 40, 125, 140]]"
         boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
         self.assertTrue(parser_fallback_used)
         self.assertEqual(len(boxes), 1)
-        self.assertAlmostEqual(boxes[0][0], 160.0)   # 250/1000 * 640
-        self.assertAlmostEqual(boxes[0][1], 120.0)   # 250/1000 * 480
-        self.assertAlmostEqual(boxes[0][2], 320.0)   # (750-250)/1000 * 640
-        self.assertAlmostEqual(boxes[0][3], 240.0)   # (750-250)/1000 * 480
+        self.assertEqual(boxes[0], [25.0, 40.0, 100.0, 100.0])
 
     def test_qwen_native_format_still_uses_ratio_correction(self):
         """Native <|box_start|> format applies pixel-space ratio correction, not /1000."""
@@ -86,8 +83,14 @@ class ParserContractTests(unittest.TestCase):
         boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
         self.assertTrue(parser_fallback_used)
         self.assertEqual(len(boxes), 1)
-        self.assertAlmostEqual(boxes[0][0], 64.0)    # 100/1000 * 640
-        self.assertAlmostEqual(boxes[0][1], 48.0)    # 100/1000 * 480
+        self.assertEqual(boxes[0], [100.0, 100.0, 300.0, 300.0])
+
+    def test_qwen_parses_bbox_2d_json_objects(self):
+        text = '[{"bbox_2d": [25, 40, 125, 140], "label": "chair"}]'
+        boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
+        self.assertTrue(parser_fallback_used)
+        self.assertEqual(len(boxes), 1)
+        self.assertEqual(boxes[0], [25.0, 40.0, 100.0, 100.0])
 
     def test_qwen_native_format_drops_degenerate_boxes(self):
         """Native-format degenerate boxes (xmax <= xmin) should be dropped."""
