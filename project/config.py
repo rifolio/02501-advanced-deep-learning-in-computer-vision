@@ -60,6 +60,11 @@ class Settings(BaseSettings):
         ge=16,
         validation_alias=AliasChoices("INTERNVL_MAX_NEW_TOKENS", "internvl_max_new_tokens"),
     )
+    qwen_max_new_tokens: int = Field(
+        default=1536,
+        ge=16,
+        validation_alias=AliasChoices("QWEN_MAX_NEW_TOKENS", "qwen_max_new_tokens"),
+    )
     k_shot: int = Field(
         default=1,
         validation_alias=AliasChoices("K_SHOT", "k_shot"),

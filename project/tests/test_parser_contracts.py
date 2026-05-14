@@ -1,7 +1,9 @@
 import unittest
+from types import SimpleNamespace
 
 from models.internVL import InternVL
 from models.qwen import Qwen2_5_VL
+from config import settings
 
 
 class ParserContractTests(unittest.TestCase):
@@ -98,6 +100,56 @@ class ParserContractTests(unittest.TestCase):
         boxes, parser_fallback_used = self.qwen._parse_boxes(text, img_width=640, img_height=480)
         self.assertFalse(parser_fallback_used)
         self.assertEqual(boxes, [])
+
+    def test_qwen_uses_configured_max_new_tokens(self):
+        class DummyTensorBatch(dict):
+            @property
+            def input_ids(self):
+                return self["input_ids"]
+
+            def to(self, device):
+                return self
+
+        class DummyProcessor:
+            def apply_chat_template(self, messages, tokenize=False, add_generation_prompt=True):
+                return "prompt"
+
+            def __call__(self, text, images, videos, padding, return_tensors):
+                return DummyTensorBatch(input_ids=[[11, 12, 13]])
+
+            def batch_decode(self, generated_ids_trimmed, skip_special_tokens=False):
+                return ["[]"]
+
+        class DummyModel:
+            def __init__(self):
+                self.kwargs = None
+
+            def generate(self, **kwargs):
+                self.kwargs = kwargs
+                return [[11, 12, 13, 14]]
+
+        qwen = Qwen2_5_VL.__new__(Qwen2_5_VL)
+        qwen.device = "cpu"
+        qwen.model_name = "Qwen2.5-VL-7B"
+        qwen.processor = DummyProcessor()
+        qwen.model = DummyModel()
+        qwen._runtime_stats = {}
+        qwen._log_inference_debug = lambda **kwargs: None
+
+        from models import qwen as qwen_module
+
+        old_process_vision_info = qwen_module.process_vision_info
+        qwen_module.process_vision_info = lambda messages: (["image"], None)
+        try:
+            qwen._run_messages(
+                content=[{"type": "image", "image": object()}, {"type": "text", "text": "prompt"}],
+                img_width=640,
+                img_height=480,
+            )
+        finally:
+            qwen_module.process_vision_info = old_process_vision_info
+
+        self.assertEqual(qwen.model.kwargs["max_new_tokens"], settings.qwen_max_new_tokens)
 
 
 if __name__ == "__main__":
