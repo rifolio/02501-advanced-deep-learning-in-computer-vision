@@ -378,10 +378,7 @@ class InternVL(BaseVLM):
         structured_inputs = [
             {
                 "image": support_image,
-                "text": (
-                    f"Support example {idx}: use this as visual grounding context for the task below.\n"
-                    f"{prompt_text.rstrip()}"
-                ),
+                "text": f"Support image {idx}.",
             }
             for idx, support_image in enumerate(support_images, start=1)
         ]
